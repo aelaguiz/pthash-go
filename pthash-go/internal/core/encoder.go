@@ -314,28 +314,28 @@ func (cv *CompactVector) Set(i uint64, val uint64) {
 	pos := i * uint64(cv.width)
 	
 	// Clear existing bits
-	wordIdx := pos / 64
-	bitIdx := pos % 64
+	wordIndex := pos / 64
+	bitIndex := pos % 64
 	
 	// If the value spans a single word
-	if bitIdx + uint64(cv.width) <= 64 {
-		mask := ((uint64(1) << cv.width) - 1) << bitIdx
-		cv.data.bits[wordIdx] &= ^mask
-		cv.data.bits[wordIdx] |= (val << bitIdx)
+	if bitIndex + uint64(cv.width) <= 64 {
+		mask := ((uint64(1) << cv.width) - 1) << bitIndex
+		cv.data.bits[wordIndex] &= ^mask
+		cv.data.bits[wordIndex] |= (val << bitIndex)
 	} else {
 		// Value spans two words
-		firstWordBits := 64 - bitIdx
+		firstWordBits := 64 - bitIndex
 		secondWordBits := cv.width - uint8(firstWordBits)
 		
 		// Clear and set first word
-		firstWordMask := ^uint64(0) << bitIdx
-		cv.data.bits[wordIdx] &= ^firstWordMask
-		cv.data.bits[wordIdx] |= (val << bitIdx)
+		firstWordMask := ^uint64(0) << bitIndex
+		cv.data.bits[wordIndex] &= ^firstWordMask
+		cv.data.bits[wordIndex] |= (val << bitIndex)
 		
 		// Clear and set second word
 		secondWordMask := (uint64(1) << secondWordBits) - 1
-		cv.data.bits[wordIdx+1] &= ^secondWordMask
-		cv.data.bits[wordIdx+1] |= (val >> firstWordBits)
+		cv.data.bits[wordIndex+1] &= ^secondWordMask
+		cv.data.bits[wordIndex+1] |= (val >> firstWordBits)
 	}
 }
 
@@ -516,6 +516,9 @@ type EliasFano struct { /* TODO */ }
 
 // DiffCompactEncoder for dense partitioned offsets. Placeholder.
 type DiffCompactEncoder struct {} // Empty placeholder
+
+// Constants for EliasFano and other encoders
+const logPhiMinus1 = -0.48121182505960345 // Pre-computed log(phi-1) = log(1/phi) = -log(phi)
 
 // EliasFano stores a monotone sequence compactly. Placeholder.
 type EliasFano struct {
