@@ -3,9 +3,8 @@ package builder
 import (
 	"container/heap"
 	"fmt"
-	"pthash-go/internal/core"
-	"pthash-go/internal/util"
-	"runtime"
+	"pthashgo/internal/core"
+	"pthashgo/internal/util"
 	"sort"
 	"sync"
 	"time"
@@ -297,10 +296,10 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) mapParallel(keys []K) []pairsT
 type bucketsT struct {
 	// Store buckets grouped by size: buffers[size-1] contains buckets of size 'size'
 	// Each inner slice contains [id, p1, id, p1, p2, id, p1, p2, p3, ...]
-	buffers        [core.MaxBucketSize][]uint64
-	maxBucketSize  core.BucketSizeType
+	buffers         [core.MaxBucketSize][]uint64
+	maxBucketSize   core.BucketSizeType
 	totalNumBuckets uint64
-	sizeCounts     [core.MaxBucketSize]uint64 // Count of buckets for each size
+	sizeCounts      [core.MaxBucketSize]uint64 // Count of buckets for each size
 }
 
 func newBucketsT() *bucketsT {
@@ -371,7 +370,7 @@ func mergeSingleBlock(pairs pairsT, merger *bucketsT, verbose bool, secondarySor
 	logger := util.NewProgressLogger(totalPairs, "Merging single block: ", " pairs", verbose)
 	defer logger.Finalize()
 
-	startIdx := 0
+	// startIdx := 0
 	currentBucketID := pairs[0].BucketID
 	payloads := make([]uint64, 0, 8) // Initial capacity
 
@@ -399,7 +398,7 @@ func mergeSingleBlock(pairs pairsT, merger *bucketsT, verbose bool, secondarySor
 			currentBucketID = pair.BucketID
 			payloads = payloads[:0] // Clear slice while retaining capacity
 			payloads = append(payloads, pair.Payload)
-			startIdx = i
+			// startIdx = i
 		}
 	}
 
@@ -418,29 +417,29 @@ func mergeSingleBlock(pairs pairsT, merger *bucketsT, verbose bool, secondarySor
 
 // heapItem stores an item for the merge heap.
 type heapItem struct {
-	pair   core.BucketPayloadPair
+	pair     core.BucketPayloadPair
 	blockIdx int // Index of the block this pair came from
 }
 
 // minHeap implements heap.Interface for merging pairs.
 type minHeap struct {
-    items []heapItem
-    secondarySort bool
+	items         []heapItem
+	secondarySort bool
 }
 
 func (h minHeap) Len() int { return len(h.items) }
 func (h minHeap) Less(i, j int) bool {
 	// Comparison logic depends on the initial sort order (secondarySort)
 	if h.secondarySort { // If blocks were sorted descending by BucketID
-	    // We want the *largest* BucketID at the top (min-heap on negated ID?)
-	    // Or, simpler: use a max-heap based on BucketID, then min-heap on Payload.
-	    // Let's stick to min-heap convention: smallest element comes out first.
-	    // If blocks are sorted DESC by ID, the heap needs custom logic.
-	    // Let's assume blocks are sorted ASC by ID for standard heap merge.
-	    // *** If secondarySort=true required DESC sort, this heap merge won't work directly ***
-	    // *** Rethink: C++ merge processes buckets *backwards* by size later. ***
-	    // *** The initial sort order might primarily be for collision detection ***
-	    // *** Let's proceed assuming standard ASC merge, adjust if needed ***
+		// We want the *largest* BucketID at the top (min-heap on negated ID?)
+		// Or, simpler: use a max-heap based on BucketID, then min-heap on Payload.
+		// Let's stick to min-heap convention: smallest element comes out first.
+		// If blocks are sorted DESC by ID, the heap needs custom logic.
+		// Let's assume blocks are sorted ASC by ID for standard heap merge.
+		// *** If secondarySort=true required DESC sort, this heap merge won't work directly ***
+		// *** Rethink: C++ merge processes buckets *backwards* by size later. ***
+		// *** The initial sort order might primarily be for collision detection ***
+		// *** Let's proceed assuming standard ASC merge, adjust if needed ***
 		// Standard Ascending Merge:
 		return h.items[i].pair.Less(h.items[j].pair)
 	}
@@ -465,7 +464,6 @@ func mergeMultipleBlocks(pairsBlocks []pairsT, merger *bucketsT, verbose bool, s
 	if secondarySort {
 		util.Log(verbose, "Warning: Heap merge with secondarySort=true (descending ID sort) might be incorrect. Assuming ASC sort for merge.")
 	}
-
 
 	totalPairs := uint64(0)
 	blockIters := make([]int, len(pairsBlocks)) // Current index within each block
@@ -546,16 +544,15 @@ func mergeMultipleBlocks(pairsBlocks []pairsT, merger *bucketsT, verbose bool, s
 	return nil
 }
 
-
 // --- Buckets Iterator ---
 
 // bucketsIteratorT iterates over buckets collected by bucketsT.
 // It iterates backwards by size, matching the C++ search order.
 type bucketsIteratorT struct {
-	buffers     [][]uint64 // Slice view of the buffers (up to max size)
-	bufferIdx   int        // Current buffer index (maps to size-1)
-	currentPos  int        // Current position within buffers[bufferIdx]
-	bucketSize  core.BucketSizeType
+	buffers    [][]uint64 // Slice view of the buffers (up to max size)
+	bufferIdx  int        // Current buffer index (maps to size-1)
+	currentPos int        // Current position within buffers[bufferIdx]
+	bucketSize core.BucketSizeType
 }
 
 // newBucketsIterator creates an iterator. buffers should be sized appropriately.
@@ -614,7 +611,6 @@ func (it *bucketsIteratorT) Next() core.BucketT {
 	return bucket
 }
 
-
 // --- Pilots Wrapper (for search output) ---
 
 // PilotsBuffer defines the interface for receiving (bucketID, pilot) pairs from search.
@@ -664,8 +660,8 @@ func fillFreeSlots(taken *core.BitVector, numKeys uint64, freeSlots *[]uint64, t
 	// Reset the slice, but keep capacity
 	*freeSlots = (*freeSlots)[:0]
 
-	nextUsedSlot := numKeys     // Start scanning for free slots from here
-	lastFreeSlot := uint64(0)   // Slot < numKeys that is currently free
+	nextUsedSlot := numKeys        // Start scanning for free slots from here
+	lastFreeSlot := uint64(0)      // Slot < numKeys that is currently free
 	lastValidFreeSlot := uint64(0) // The last value assigned to a free slot > numKeys
 
 	// C++ uses iterators, Go can use Get directly

@@ -2,7 +2,6 @@
 package core
 
 import (
-	"fmt"
 	"math/bits"
 )
 
@@ -119,7 +118,7 @@ func FastModU64(a uint64, m M64, d uint64) uint64 {
 	// Add the high part of the low product to the low part of the high product
 	// lowbits_lo = p1l
 	// lowbits_hi = p1h + p0h (with carry)
-	lowbits_hi, lowbits_lo_carry := bits.Add64(p1h, p0h, 0)
+	lowbits_hi, _ := bits.Add64(p1h, p0h, 0)
 
 	// If there was a carry when calculating lowbits_hi, it's part of the bits
 	// above the 128 we need, so we ignore it.

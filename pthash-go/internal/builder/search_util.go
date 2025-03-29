@@ -1,9 +1,8 @@
 package builder
 
 import (
-	"fmt"
-	"pthash-go/internal/core" // Assuming core has Bucketer interface for estimate
-	"pthash-go/internal/util"
+	"pthashgo/internal/core" // Assuming core has Bucketer interface for estimate
+	"pthashgo/internal/util"
 	"time"
 )
 

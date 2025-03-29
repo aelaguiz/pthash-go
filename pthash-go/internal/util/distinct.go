@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"pthash-go/internal/core"
+	"pthashgo/internal/core"
 )
 
 // DistinctUints64 generates numKeys distinct uint64 values using the given seed.

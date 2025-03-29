@@ -7,10 +7,10 @@ import (
 	"io"
 	"math"
 	"time"
-	
-	"pthash-go/internal/builder"
-	"pthash-go/internal/core"
-	"pthash-go/pkg/serial"
+
+	"pthashgo/internal/builder"
+	"pthashgo/internal/core"
+	"pthashgo/internal/serial"
 )
 
 // SinglePHF implements the non-partitioned PTHash function.
@@ -23,11 +23,11 @@ type SinglePHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct 
 	seed       uint64
 	numKeys    uint64
 	tableSize  uint64
-	m128       core.M64  // Fastmod parameter for 128-bit hashes (XOR search)
-	m64        core.M32  // Fastmod parameter for 64-bit hashes (ADD search)
-	hasher     H         // Instance of the hasher (zero value initially)
-	bucketer   B         // Instance of the bucketer
-	pilots     E         // Encoded pilot values
+	m128       core.M64        // Fastmod parameter for 128-bit hashes (XOR search)
+	m64        core.M32        // Fastmod parameter for 64-bit hashes (ADD search)
+	hasher     H               // Instance of the hasher (zero value initially)
+	bucketer   B               // Instance of the bucketer
+	pilots     E               // Encoded pilot values
 	freeSlots  *core.EliasFano // Elias-Fano for free slots if minimal (pointer for nil possibility)
 	isMinimal  bool
 	searchType core.SearchType
@@ -75,10 +75,10 @@ func (f *SinglePHF[K, H, B, E]) Build(
 		f.m128 = core.ComputeM64(f.tableSize)
 		f.m64 = core.ComputeM32(uint32(f.tableSize)) // Assumes tableSize fits uint32 for Add search's hash mixing step
 		if f.tableSize > math.MaxUint32 && f.searchType == core.SearchTypeAdd {
-		    // The ADD search variant's mixing uses fastmod32. This might be an issue.
-		    // C++ shifts hash.second() >> 33 before fastmod32, maybe that's okay?
-		    // Needs careful check if tableSize > 2^32.
-		    // For now, proceed assuming C++ handles it or tableSize is usually smaller.
+			// The ADD search variant's mixing uses fastmod32. This might be an issue.
+			// C++ shifts hash.second() >> 33 before fastmod32, maybe that's okay?
+			// Needs careful check if tableSize > 2^32.
+			// For now, proceed assuming C++ handles it or tableSize is usually smaller.
 		}
 	}
 	f.bucketer = b.Bucketer() // Copy bucketer state
@@ -117,7 +117,7 @@ func (f *SinglePHF[K, H, B, E]) Build(
 
 // Lookup evaluates the hash function for a key.
 func (f *SinglePHF[K, H, B, E]) Lookup(key K) uint64 {
-	hash := f.hasher.Hash(key, f.seed)         // Assumes f.hasher is usable (stateless or initialized)
+	hash := f.hasher.Hash(key, f.seed)        // Assumes f.hasher is usable (stateless or initialized)
 	bucket := f.bucketer.Bucket(hash.First()) // Assumes f.bucketer is initialized
 	pilot := f.pilots.Access(uint64(bucket))  // Assumes f.pilots is initialized and Access takes uint64
 
@@ -168,12 +168,11 @@ func (f *SinglePHF[K, H, B, E]) Lookup(key K) uint64 {
 
 // --- Accessors ---
 
-func (f *SinglePHF[K, H, B, E]) NumKeys() uint64    { return f.numKeys }
-func (f *SinglePHF[K, H, B, E]) TableSize() uint64  { return f.tableSize }
-func (f *SinglePHF[K, H, B, E]) Seed() uint64       { return f.seed }
-func (f *SinglePHF[K, H, B, E]) IsMinimal() bool    { return f.isMinimal }
+func (f *SinglePHF[K, H, B, E]) NumKeys() uint64             { return f.numKeys }
+func (f *SinglePHF[K, H, B, E]) TableSize() uint64           { return f.tableSize }
+func (f *SinglePHF[K, H, B, E]) Seed() uint64                { return f.seed }
+func (f *SinglePHF[K, H, B, E]) IsMinimal() bool             { return f.isMinimal }
 func (f *SinglePHF[K, H, B, E]) SearchType() core.SearchType { return f.searchType }
-
 
 // --- Space Calculation ---
 
@@ -205,14 +204,20 @@ const singlePHFMagic = "SPHF" // Magic identifier for file type
 func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	// 1. Calculate total size needed
 	bucketerData, err := tryMarshal(f.bucketer)
-	if err != nil { return nil, fmt.Errorf("failed to marshal bucketer: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal bucketer: %w", err)
+	}
 	pilotsData, err := tryMarshal(f.pilots)
-	if err != nil { return nil, fmt.Errorf("failed to marshal pilots: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal pilots: %w", err)
+	}
 	freeSlotsData := []byte{}
 	hasFreeSlots := f.freeSlots != nil
 	if hasFreeSlots {
 		freeSlotsData, err = tryMarshal(f.freeSlots)
-		if err != nil { return nil, fmt.Errorf("failed to marshal free slots: %w", err) }
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal free slots: %w", err)
+		}
 	}
 
 	// Size: magic(4) + version(1) + isMinimal(1) + searchType(1) + reserved(1)
@@ -232,9 +237,13 @@ func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	offset += 1
 	// Flags
 	flags := byte(0)
-	if f.isMinimal { flags |= 1 }
+	if f.isMinimal {
+		flags |= 1
+	}
 	flags |= (byte(f.searchType) << 1) // Assume searchType fits in a few bits
-	if hasFreeSlots { flags |= (1 << 3) }
+	if hasFreeSlots {
+		flags |= (1 << 3)
+	}
 	buf[offset] = flags
 	offset += 1
 	buf[offset] = 0 // Reserved
@@ -268,7 +277,9 @@ func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 
 	// Free Slots (conditional)
 	buf[offset] = 0
-	if hasFreeSlots { buf[offset] = 1 }
+	if hasFreeSlots {
+		buf[offset] = 1
+	}
 	offset += 1
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(len(freeSlotsData)))
 	offset += 8
@@ -289,7 +300,9 @@ func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 // on an empty SinglePHF instance created with NewSinglePHF<...>(...).
 func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 16
-	if len(data) < headerSize { return io.ErrUnexpectedEOF }
+	if len(data) < headerSize {
+		return io.ErrUnexpectedEOF
+	}
 	offset := 0
 
 	// Magic & Version
@@ -298,7 +311,9 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	}
 	offset += 4
 	version := data[offset]
-	if version != 1 { return fmt.Errorf("unsupported version: %d", version) }
+	if version != 1 {
+		return fmt.Errorf("unsupported version: %d", version)
+	}
 	offset += 1
 
 	// Flags
@@ -311,45 +326,73 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	offset += 1
 
 	// Core Params
-	f.seed = binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8
-	f.numKeys = binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8
-	f.tableSize = binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8
-	f.m64 = core.M32(binary.LittleEndian.Uint64(data[offset : offset+8])); offset += 8
-	f.m128[0] = binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8 // Low
-	f.m128[1] = binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8 // High
-
+	f.seed = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	f.numKeys = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	f.tableSize = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	f.m64 = core.M32(binary.LittleEndian.Uint64(data[offset : offset+8]))
+	offset += 8
+	f.m128[0] = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8 // Low
+	f.m128[1] = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8 // High
 
 	// Bucketer
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
-	bucketerLen := binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8
-	if offset+int(bucketerLen) > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	bucketerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	if offset+int(bucketerLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	err := tryUnmarshal(&f.bucketer, data[offset:offset+int(bucketerLen)]) // Unmarshal into existing instance
-	if err != nil { return fmt.Errorf("failed to unmarshal bucketer: %w", err) }
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal bucketer: %w", err)
+	}
 	offset += int(bucketerLen)
 
 	// Pilots
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
-	pilotsLen := binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8
-	if offset+int(pilotsLen) > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	pilotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	if offset+int(pilotsLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	err = tryUnmarshal(&f.pilots, data[offset:offset+int(pilotsLen)]) // Unmarshal into existing instance
-	if err != nil { return fmt.Errorf("failed to unmarshal pilots: %w", err) }
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal pilots: %w", err)
+	}
 	offset += int(pilotsLen)
 
 	// Free Slots (conditional)
-	if offset+1+8 > len(data) { return io.ErrUnexpectedEOF }
-	hasFreeSlotsRead := data[offset] == 1; offset += 1
-	if hasFreeSlotsRead != hasFreeSlots { return fmt.Errorf("mismatch in hasFreeSlots flag") }
-	freeSlotsLen := binary.LittleEndian.Uint64(data[offset : offset+8]); offset += 8
-	if offset+int(freeSlotsLen) > len(data) { return io.ErrUnexpectedEOF }
+	if offset+1+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	hasFreeSlotsRead := data[offset] == 1
+	offset += 1
+	if hasFreeSlotsRead != hasFreeSlots {
+		return fmt.Errorf("mismatch in hasFreeSlots flag")
+	}
+	freeSlotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	if offset+int(freeSlotsLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	if hasFreeSlots {
 		f.freeSlots = core.NewEliasFano() // Create instance before unmarshaling
 		err = tryUnmarshal(f.freeSlots, data[offset:offset+int(freeSlotsLen)])
-		if err != nil { return fmt.Errorf("failed to unmarshal free slots: %w", err) }
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal free slots: %w", err)
+		}
 	} else {
 		f.freeSlots = nil
 	}
 	offset += int(freeSlotsLen)
-
 
 	if offset != len(data) {
 		return fmt.Errorf("extra data detected after unmarshaling")

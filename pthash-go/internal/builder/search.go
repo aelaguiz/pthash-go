@@ -2,8 +2,8 @@ package builder
 
 import (
 	"fmt"
-	"pthash-go/internal/core"
-	"pthash-go/internal/util"
+	"pthashgo/internal/core"
+	"pthashgo/internal/util"
 	"runtime"
 	"sort"
 	"sync"
@@ -145,12 +145,11 @@ func searchSequentialXOR(
 	}
 	if processedBuckets != numNonEmptyBuckets {
 		// This might indicate an issue with the iterator or non-empty count
-		util.Log(config.Verbose,"Warning: Processed %d buckets, expected %d non-empty", processedBuckets, numNonEmptyBuckets)
+		util.Log(config.Verbose, "Warning: Processed %d buckets, expected %d non-empty", processedBuckets, numNonEmptyBuckets)
 	}
 
 	return nil
 }
-
 
 // searchParallelXOR finds pilots in parallel using XOR displacement.
 // WARNING: This implementation attempts to mimic the complex C++ locking/retry strategy.
@@ -193,14 +192,12 @@ func searchParallelXOR(
 		pilotsMu.Unlock()
 	}
 
-
 	var wg sync.WaitGroup
 	wg.Add(numThreads)
 
 	// Global state for coordinating bucket processing
 	var nextBucketIdx atomic.Uint64 // Next bucket index to be processed globally
-	var bucketMutex sync.Mutex // To safely get next bucket from iterator
-
+	var bucketMutex sync.Mutex      // To safely get next bucket from iterator
 
 	// Worker goroutine function
 	worker := func(tid int) {
@@ -258,7 +255,9 @@ func searchParallelXOR(
 							positions = append(positions, p)
 						}
 
-						if collisionFound { continue } // Try next pilot value
+						if collisionFound {
+							continue
+						} // Try next pilot value
 
 						// Check in-bucket
 						sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
@@ -269,7 +268,9 @@ func searchParallelXOR(
 								break
 							}
 						}
-						if inBucketCollision { continue } // Try next pilot value
+						if inBucketCollision {
+							continue
+						} // Try next pilot value
 
 						// Potential pilot found
 						currentPilot = pSearch
@@ -293,9 +294,8 @@ func searchParallelXOR(
 					// This should ideally not happen if search loop runs correctly
 					// If it does, restart search from currentPilot
 					pilotChecked = false // Force re-search
-					continue // Retry finding a pilot for this bucket
+					continue             // Retry finding a pilot for this bucket
 				}
-
 
 				// --- Attempt to commit the found pilot ---
 				// This requires ensuring no other thread grabbed conflicting slots
@@ -326,11 +326,11 @@ func searchParallelXOR(
 					break // Success for this bucket, exit outer retry loop
 				} else {
 					// Conflict detected during commit check
-					takenMu.Unlock() // Unlock
+					takenMu.Unlock()     // Unlock
 					pilotChecked = false // Our potential pilot is invalid, need to search again
 					// currentPilot remains the same, will restart search from there
 					runtime.Gosched() // Yield to potentially allow conflicting thread to finish
-					continue // Retry finding a pilot for this bucket (outer loop)
+					continue          // Retry finding a pilot for this bucket (outer loop)
 				}
 			} // End outer retry loop for bucket
 		} // End main loop for fetching buckets
@@ -350,16 +350,14 @@ func searchParallelXOR(
 	// if errors occurred, but it's a basic sanity check.
 	finalIdx := nextBucketIdx.Load()
 	if finalIdx < numNonEmptyBuckets {
-	    util.Log(config.Verbose,"Warning: Parallel search finished, processed ~%d buckets, expected %d. Potential contention or error.", finalIdx, numNonEmptyBuckets)
-	    // If this happens frequently, the retry/locking logic might need refinement or a different approach.
-	    // Could potentially indicate a seed failure if some buckets never found a pilot.
-	    // For now, we don't explicitly return SeedRuntimeError here, but it's a possibility.
+		util.Log(config.Verbose, "Warning: Parallel search finished, processed ~%d buckets, expected %d. Potential contention or error.", finalIdx, numNonEmptyBuckets)
+		// If this happens frequently, the retry/locking logic might need refinement or a different approach.
+		// Could potentially indicate a seed failure if some buckets never found a pilot.
+		// For now, we don't explicitly return SeedRuntimeError here, but it's a possibility.
 	}
-
 
 	return nil
 }
-
 
 // Helper for search function to get minimal table size from config
 func (c *core.BuildConfig) MinimalTableSize(numKeys uint64) uint64 {
@@ -380,8 +378,8 @@ func (b *core.BitVectorBuilder) Get(pos uint64) bool {
 	wordIndex := pos / 64
 	bitIndex := pos % 64
 	if wordIndex >= uint64(len(b.words)) {
-	    // Accessing word that hasn't been allocated yet
-	    return false
+		// Accessing word that hasn't been allocated yet
+		return false
 	}
 	return (b.words[wordIndex] & (1 << bitIndex)) != 0
 }
@@ -393,12 +391,12 @@ func (b *core.BitVectorBuilder) Set(pos uint64) {
 	wordIndex := pos / 64
 	bitIndex := pos % 64
 	if wordIndex >= uint64(len(b.words)) { // Ensure word exists after potential grow
-	    neededLen := wordIndex + 1
-	    if neededLen > uint64(cap(b.words)){
-	        // Should not happen if grow worked correctly
-	        panic("Set after grow failed")
-	    }
-	     b.words = b.words[:neededLen]
+		neededLen := wordIndex + 1
+		if neededLen > uint64(cap(b.words)) {
+			// Should not happen if grow worked correctly
+			panic("Set after grow failed")
+		}
+		b.words = b.words[:neededLen]
 	}
 	b.words[wordIndex] |= (1 << bitIndex)
 	if pos >= b.size { // Update size if we set a bit beyond the current end

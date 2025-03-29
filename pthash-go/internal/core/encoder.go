@@ -2,11 +2,11 @@ package core
 
 import (
 	"encoding" // Add this import for BinaryMarshaler/Unmarshaler
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
-	"pthash-go/pkg/serial"
+
+	"pthashgo/internal/serial"
 )
 
 // Encoder defines the interface for encoding/decoding pilot values.
@@ -30,8 +30,8 @@ type Encoder interface {
 
 // RiceSequence implements Golomb-Rice coding for a sequence of uint64.
 type RiceSequence struct {
-	highBits      *BitVector // Unary part (using D1Array style select)
-	highBitsD1    *D1Array   // Rank/Select structure for highBits
+	highBits      *BitVector     // Unary part (using D1Array style select)
+	highBitsD1    *D1Array       // Rank/Select structure for highBits
 	lowBits       *CompactVector // Remainder part (fixed-width integers)
 	optimalParamL uint8          // Optimal Rice parameter 'l' used for encoding
 }
@@ -74,7 +74,7 @@ func optimalParameterKiely(values []uint64) uint8 {
 	const logPhiMinus1 = -0.34948500216 // log2(phi - 1) precomputed
 
 	log1MinusP := math.Log2(1.0 - p) // Use Log2 directly as in C++ formula
-	if log1MinusP == 0 { // Avoid division by zero if p is very close to 0
+	if log1MinusP == 0 {             // Avoid division by zero if p is very close to 0
 		return 63 // Large parameter if p is tiny
 	}
 
@@ -270,9 +270,9 @@ func (e *RiceEncoder) UnmarshalBinary(data []byte) error {
 
 // CompactVector stores integers using a fixed number of bits per element.
 type CompactVector struct {
-	data   *BitVector
-	width  uint8  // Bits per element
-	size   uint64 // Number of elements
+	data  *BitVector
+	width uint8  // Bits per element
+	size  uint64 // Number of elements
 }
 
 // NewCompactVector creates a new CompactVector with the given size and bit width.
@@ -280,16 +280,16 @@ func NewCompactVector(n uint64, w uint8) *CompactVector {
 	if w > 64 {
 		panic("CompactVector: width must be <= 64 bits")
 	}
-	
+
 	totalBits := uint64(0)
 	if w > 0 && n > 0 {
 		totalBits = n * uint64(w)
 	}
-	
+
 	return &CompactVector{
-		data:   NewBitVector(totalBits),
-		width:  w,
-		size:   n,
+		data:  NewBitVector(totalBits),
+		width: w,
+		size:  n,
 	}
 }
 
@@ -310,7 +310,7 @@ func (cv *CompactVector) Set(i uint64, val uint64) {
 	if i >= cv.size {
 		panic("CompactVector.Set: index out of bounds")
 	}
-	
+
 	// If width is 0, all elements must be 0
 	if cv.width == 0 {
 		if val != 0 {
@@ -318,20 +318,20 @@ func (cv *CompactVector) Set(i uint64, val uint64) {
 		}
 		return
 	}
-	
+
 	// Check if val fits in width bits
-	if cv.width < 64 && val >= (uint64(1) << cv.width) {
+	if cv.width < 64 && val >= (uint64(1)<<cv.width) {
 		panic(fmt.Sprintf("CompactVector.Set: value %d exceeds width %d", val, cv.width))
 	}
-	
+
 	pos := i * uint64(cv.width)
-	
+
 	// Clear existing bits
 	wordIndex := pos / 64
 	bitIndex := pos % 64
-	
+
 	// If the value spans a single word
-	if bitIndex + uint64(cv.width) <= 64 {
+	if bitIndex+uint64(cv.width) <= 64 {
 		mask := ((uint64(1) << cv.width) - 1) << bitIndex
 		cv.data.bits[wordIndex] &= ^mask
 		cv.data.bits[wordIndex] |= (val << bitIndex)
@@ -339,12 +339,12 @@ func (cv *CompactVector) Set(i uint64, val uint64) {
 		// Value spans two words
 		firstWordBits := 64 - bitIndex
 		secondWordBits := cv.width - uint8(firstWordBits)
-		
+
 		// Clear and set first word
 		firstWordMask := ^uint64(0) << bitIndex
 		cv.data.bits[wordIndex] &= ^firstWordMask
 		cv.data.bits[wordIndex] |= (val << bitIndex)
-		
+
 		// Clear and set second word
 		secondWordMask := (uint64(1) << secondWordBits) - 1
 		cv.data.bits[wordIndex+1] &= ^secondWordMask
@@ -421,7 +421,7 @@ func (e *CompactEncoder) Encode(pilots []uint64) error {
 		e.values = NewCompactVector(0, 0)
 		return nil
 	}
-	
+
 	// Determine max value to find width 'w'
 	maxVal := uint64(0)
 	for _, p := range pilots {
@@ -429,14 +429,14 @@ func (e *CompactEncoder) Encode(pilots []uint64) error {
 			maxVal = p
 		}
 	}
-	
+
 	w := uint8(0)
 	if maxVal > 0 {
 		w = uint8(bits.Len64(maxVal))
 	} else {
 		w = 1 // Need at least 1 bit to store 0
 	}
-	
+
 	cv := NewCompactVector(uint64(len(pilots)), w)
 	for i, p := range pilots {
 		cv.Set(uint64(i), p)
@@ -555,13 +555,13 @@ type EliasFano struct {
 	// Internal data structures for lower/upper bits, rank/select
 	numValues uint64
 	// Placeholder fields
-	lowerBits *BitVector
-	upperBits *BitVector
+	lowerBits       *BitVector
+	upperBits       *BitVector
 	upperBitsSelect *D1Array // For select0 on upper bits
 }
 
 // DiffCompactEncoder for dense partitioned offsets. Placeholder.
-type DiffCompactEncoder struct {} // Empty placeholder
+type DiffCompactEncoder struct{} // Empty placeholder
 
 // Constants for EliasFano and other encoders
 const logPhiMinus1 = -0.48121182505960345 // Pre-computed log(phi-1) = log(1/phi) = -log(phi)
@@ -607,9 +607,15 @@ func (ef *EliasFano) NumBits() uint64 {
 	lbBits := uint64(0)
 	ubBits := uint64(0)
 	selBits := uint64(0)
-	if ef.lowerBits != nil { lbBits = ef.lowerBits.NumBitsStored() }
-	if ef.upperBits != nil { ubBits = ef.upperBits.NumBitsStored() }
-	if ef.upperBitsSelect != nil { selBits = ef.upperBitsSelect.NumBits() }
+	if ef.lowerBits != nil {
+		lbBits = ef.lowerBits.NumBitsStored()
+	}
+	if ef.upperBits != nil {
+		ubBits = ef.upperBits.NumBitsStored()
+	}
+	if ef.upperBitsSelect != nil {
+		selBits = ef.upperBitsSelect.NumBits()
+	}
 	return lbBits + ubBits + selBits + 8*8 // + size field
 }
 
@@ -624,4 +630,3 @@ func (ef *EliasFano) UnmarshalBinary(data []byte) error {
 	// TODO: Deserialize fields
 	return fmt.Errorf("EliasFano.UnmarshalBinary not implemented")
 }
-

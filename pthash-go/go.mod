@@ -1,4 +1,4 @@
-module pthash-go
+module pthashgo
 
 go 1.20
 

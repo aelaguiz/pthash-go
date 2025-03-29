@@ -1,4 +1,4 @@
-# pthash-go
+# pthashgo
 
 A Go port of the PTHash library for fast and compact minimal perfect hash functions.
 
