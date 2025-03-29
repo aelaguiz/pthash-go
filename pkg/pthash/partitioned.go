@@ -21,9 +21,9 @@ import (
 type PartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct {
 	seed        uint64
 	numKeys     uint64
-	tableSize   uint64                  // Total size estimate across partitions
-	partitioner core.RangeBucketer      // Used to map key hash to partition
-	partitions  []partition[K, H, B, E] // Slice of sub-PHFs
+	tableSize   uint64                   // Total size estimate across partitions
+	partitioner *core.RangeBucketer      // Used to map key hash to partition
+	partitions  []partition[K, H, B, E]  // Slice of sub-PHFs
 	hasher      H                       // Store hasher instance
 	isMinimal   bool
 	searchType  core.SearchType
@@ -39,9 +39,10 @@ type partition[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct 
 func NewPartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder](minimal bool, search core.SearchType) *PartitionedPHF[K, H, B, E] {
 	var hasher H // Zero value hasher
 	return &PartitionedPHF[K, H, B, E]{
-		isMinimal:  minimal,
-		searchType: search,
-		hasher:     hasher,
+		isMinimal:   minimal,
+		searchType:  search,
+		hasher:      hasher,
+		partitioner: &core.RangeBucketer{}, // Initialize as pointer
 		// Other fields initialized by Build
 	}
 }
@@ -72,7 +73,7 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 	f.seed = pb.Seed()
 	f.numKeys = pb.NumKeys()
 	f.tableSize = pb.TableSize()
-	f.partitioner = pb.Partitioner()
+	f.partitioner = pb.Partitioner() // This now assigns a pointer to a pointer
 	f.hasher = pb.Hasher() // Get hasher instance from builder
 	numPartitions := pb.NumPartitions()
 	f.partitions = make([]partition[K, H, B, E], numPartitions)
@@ -238,7 +239,7 @@ func (f *PartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	// partitioner, numPartitions, and then each partition (offset + marshaled sub-PHF).
 
 	// 1. Marshal partitioner
-	partitionerData, err := tryMarshal(&f.partitioner) // Pass pointer
+	partitionerData, err := tryMarshal(f.partitioner) // Already a pointer
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal partitioner: %w", err)
 	}

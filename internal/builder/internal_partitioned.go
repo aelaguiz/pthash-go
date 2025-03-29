@@ -15,9 +15,9 @@ type InternalMemoryBuilderPartitionedPHF[K any, H core.Hasher[K], B core.Buckete
 	seed          uint64
 	numKeys       uint64
 	numPartitions uint64
-	tableSize     uint64             // Total estimated table size across partitions
-	partitioner   core.RangeBucketer // Bucketer used to partition keys
-	hasher        H                  // Hasher instance
+	tableSize     uint64              // Total estimated table size across partitions
+	partitioner   *core.RangeBucketer // Bucketer used to partition keys
+	hasher        H                   // Hasher instance
 
 	// Intermediate results stored in the builder
 	partitionBuffers [][]core.Hash128 // Hashes belonging to each partition
@@ -37,7 +37,8 @@ func NewInternalMemoryBuilderPartitionedPHF[K any, H core.Hasher[K], B core.Buck
 	// Note: The sub-builder's Bucketer type 'B' is passed in,
 	// but the partitioner is always RangeBucketer.
 	return &InternalMemoryBuilderPartitionedPHF[K, H, B]{
-		hasher: hasher,
+		hasher:      hasher,
+		partitioner: &core.RangeBucketer{},
 	}
 }
 
@@ -502,7 +503,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) TableSize() uint64 {
 
 // Partitioner returns the partitioner instance.
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Partitioner() *core.RangeBucketer {
-	return &pb.partitioner
+	return pb.partitioner
 }
 
 // Builders returns the slice of sub-builders.
