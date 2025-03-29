@@ -130,7 +130,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								_, err := builder.BuildFromKeys(keys, config)
 								if err != nil {
 									// Don't fail test on SeedRuntimeError, just log it
-									if _, ok := err.(builder.SeedRuntimeError); ok {
+									if _, ok := err.(core.SeedRuntimeError); ok {
 										t.Logf("Build failed with SeedRuntimeError (seed %d): %v - Skipping check", config.Seed, err)
 										return // Skip check for this seed
 									}

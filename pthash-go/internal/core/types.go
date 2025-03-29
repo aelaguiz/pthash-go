@@ -61,6 +61,18 @@ func (bpp BucketPayloadPair) String() string {
 	return fmt.Sprintf("{BucketID: %d, Payload: %d}", bpp.BucketID, bpp.Payload)
 }
 
+// --- Error Type ---
+
+// SeedRuntimeError indicates that the chosen seed resulted in a configuration
+// that PTHash cannot resolve (e.g., duplicate payloads, bucket too large).
+type SeedRuntimeError struct {
+	Msg string
+}
+
+func (e SeedRuntimeError) Error() string {
+	return fmt.Sprintf("seed did not work: %s", e.Msg)
+}
+
 // BucketT provides a view over a slice representing a single bucket's data.
 // The underlying slice typically contains [bucket_id, payload1, payload2, ...].
 type BucketT struct {

@@ -141,7 +141,7 @@ func searchSequentialXOR(
 		// Let's add a check in case the inner loop somehow exits without finding a pilot (should be impossible?)
 		if !foundPilot {
 			// This indicates an issue, likely requires a new seed.
-			return SeedRuntimeError{fmt.Sprintf("could not find pilot for bucket %d", bucketID)}
+			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d", bucketID)}
 		}
 		processedBuckets++
 	}

@@ -87,7 +87,7 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) BuildFromKeys(keys []K, config
 				return timings, nil // Success
 			}
 			util.Log(config.Verbose, "Attempt %d failed: %v", attempt+1, err)
-			if _, ok := err.(SeedRuntimeError); !ok {
+			if _, ok := err.(core.SeedRuntimeError); !ok {
 				return core.BuildTimings{}, err // Return non-seed related errors immediately
 			}
 		}
@@ -382,13 +382,13 @@ func mergeSingleBlock(pairs pairsT, merger *bucketsT, verbose bool, secondarySor
 			// Check for duplicate payloads within the same bucket
 			// Requires the block to be sorted by ID then Payload
 			if len(payloads) > 0 && pair.Payload == payloads[len(payloads)-1] {
-				return SeedRuntimeError{fmt.Sprintf("duplicate payload %d in bucket %d", pair.Payload, pair.BucketID)}
+				return core.SeedRuntimeError{Msg: fmt.Sprintf("duplicate payload %d in bucket %d", pair.Payload, pair.BucketID)}
 			}
 			payloads = append(payloads, pair.Payload)
 		} else {
 			// End of the previous bucket, add it to the merger
 			if len(payloads) > int(core.MaxBucketSize) {
-				return SeedRuntimeError{fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
+				return core.SeedRuntimeError{Msg: fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
 			}
 			if len(payloads) > 0 {
 				merger.add(currentBucketID, payloads)
@@ -404,7 +404,7 @@ func mergeSingleBlock(pairs pairsT, merger *bucketsT, verbose bool, secondarySor
 
 	// Add the last bucket
 	if len(payloads) > int(core.MaxBucketSize) {
-		return SeedRuntimeError{fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
+		return core.SeedRuntimeError{Msg: fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
 	}
 	if len(payloads) > 0 {
 		merger.add(currentBucketID, payloads)
@@ -507,13 +507,13 @@ func mergeMultipleBlocks(pairsBlocks []pairsT, merger *bucketsT, verbose bool, s
 		if pair.BucketID == currentBucketID {
 			// Check for duplicate payloads
 			if len(payloads) > 0 && pair.Payload == payloads[len(payloads)-1] {
-				return SeedRuntimeError{fmt.Sprintf("duplicate payload %d in bucket %d", pair.Payload, pair.BucketID)}
+				return core.SeedRuntimeError{Msg: fmt.Sprintf("duplicate payload %d in bucket %d", pair.Payload, pair.BucketID)}
 			}
 			payloads = append(payloads, pair.Payload)
 		} else {
 			// Finish previous bucket
 			if len(payloads) > int(core.MaxBucketSize) {
-				return SeedRuntimeError{fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
+				return core.SeedRuntimeError{Msg: fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
 			}
 			if len(payloads) > 0 {
 				merger.add(currentBucketID, payloads)
@@ -535,7 +535,7 @@ func mergeMultipleBlocks(pairsBlocks []pairsT, merger *bucketsT, verbose bool, s
 
 	// Add the very last bucket
 	if len(payloads) > int(core.MaxBucketSize) {
-		return SeedRuntimeError{fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
+		return core.SeedRuntimeError{Msg: fmt.Sprintf("bucket %d size %d exceeds max %d", currentBucketID, len(payloads), core.MaxBucketSize)}
 	}
 	if len(payloads) > 0 {
 		merger.add(currentBucketID, payloads)
@@ -636,17 +636,6 @@ func (pw *pilotsWrapper) EmplaceBack(bucketID core.BucketIDType, pilot uint64) {
 	pw.pilots[bucketID] = pilot
 }
 
-// --- Error Type ---
-
-// SeedRuntimeError indicates that the chosen seed resulted in a configuration
-// that PTHash cannot resolve (e.g., duplicate payloads, bucket too large).
-type SeedRuntimeError struct {
-	Msg string
-}
-
-func (e SeedRuntimeError) Error() string {
-	return fmt.Sprintf("seed did not work: %s", e.Msg)
-}
 
 // --- Fill Free Slots ---
 
