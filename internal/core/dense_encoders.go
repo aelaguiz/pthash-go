@@ -119,7 +119,7 @@ func (dm *DenseMono[E]) UnmarshalBinary(data []byte) error {
 
 // DenseInterleaved uses a separate encoder E for each bucket index.
 type DenseInterleaved[E Encoder] struct {
-	Encoders []E // Slice of encoders (non-pointer assumed based on C++)
+	Encoders []*E // Store pointers to encoders
 }
 
 func (di *DenseInterleaved[E]) Name() string { var zeroE E; return "inter-" + zeroE.Name() }
@@ -144,7 +144,7 @@ func (di *DenseInterleaved[E]) Access(i uint64) uint64 {
 }
 
 func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions uint64, numBucketsPerPartition uint64, numThreads int) error {
-	di.Encoders = make([]E, numBucketsPerPartition) // Slice of values, not pointers
+	di.Encoders = make([]*E, numBucketsPerPartition) // Slice of pointers
 	totalPilots := numPartitions * numBucketsPerPartition
 	allPilots := make([]uint64, 0, totalPilots)
 	for iterator.HasNext() {
@@ -161,12 +161,14 @@ func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions
 				idx := b*numPartitions + p
 				pilotsForBucket[p] = allPilots[idx]
 			}
-			var encoder E // Create new zero value for this bucket
-			err := encoder.Encode(pilotsForBucket)
+			// Create a pointer to a new zero value
+			encoderPtr := new(E)
+			// Need to call Encode on the pointer receiver
+			err := (*encoderPtr).Encode(pilotsForBucket)
 			if err != nil {
 				return fmt.Errorf("encoding bucket %d failed: %w", b, err)
 			}
-			di.Encoders[b] = encoder // Store the value
+			di.Encoders[b] = encoderPtr // Store the pointer
 		}
 		return nil
 	}
@@ -201,17 +203,22 @@ func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions
 }
 
 func (di *DenseInterleaved[E]) AccessDense(partition uint64, bucket uint64) uint64 {
-	if bucket >= uint64(len(di.Encoders)) {
-		panic(fmt.Sprintf("DenseInterleaved.AccessDense: bucket index %d out of bounds (%d)", bucket, len(di.Encoders)))
+	if bucket >= uint64(len(di.Encoders)) || di.Encoders[bucket] == nil {
+		panic(fmt.Sprintf("DenseInterleaved.AccessDense: bucket index %d out of bounds or nil encoder (%d)", bucket, len(di.Encoders)))
 	}
-	return di.Encoders[bucket].Access(partition) // Access element directly
+	return (*di.Encoders[bucket]).Access(partition) // Access via pointer
 }
 func (di *DenseInterleaved[E]) MarshalBinary() ([]byte, error) {
 	numEncoders := uint64(len(di.Encoders))
 	encodedData := make([][]byte, numEncoders)
 	totalDataLen := 0
-	for i, enc := range di.Encoders {
-		data, err := serial.TryMarshal(&enc) // Marshal pointer to allow modification if needed? Or value? Marshal value.
+	for i, encPtr := range di.Encoders {
+		if encPtr == nil {
+			// Handle nil pointers - serialize as zero length
+			encodedData[i] = []byte{}
+			continue
+		}
+		data, err := serial.TryMarshal(encPtr) // Marshal the pointer itself
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal encoder %d: %w", i, err)
 		}
@@ -242,7 +249,7 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 	offset := 0
 	numEncoders := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
-	di.Encoders = make([]E, numEncoders)
+	di.Encoders = make([]*E, numEncoders) // Slice of pointers
 	for i := uint64(0); i < numEncoders; i++ {
 		if offset+8 > len(data) {
 			return io.ErrUnexpectedEOF
@@ -252,13 +259,18 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 		if uint64(offset)+encLen > uint64(len(data)) {
 			return io.ErrUnexpectedEOF
 		}
-		// Create zero value and unmarshal into it
-		var encoder E
-		err := serial.TryUnmarshal(&encoder, data[offset:offset+int(encLen)])
+		// Skip empty encoders (nil pointers)
+		if encLen == 0 {
+			di.Encoders[i] = nil
+			continue
+		}
+		// Create zero value pointer and unmarshal into it
+		encoderPtr := new(E)
+		err := serial.TryUnmarshal(encoderPtr, data[offset:offset+int(encLen)])
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal encoder %d: %w", i, err)
 		}
-		di.Encoders[i] = encoder // Assign value
+		di.Encoders[i] = encoderPtr // Assign pointer
 		offset += int(encLen)
 	}
 	if offset != len(data) {
@@ -371,7 +383,7 @@ func (de *DiffEncoder[E]) UnmarshalBinary(data []byte) error {
 // --- Convenience Type Aliases ---
 // Make these pointers consistent with how they might be used in PHF structs
 type MonoR = DenseMono[*RiceEncoder]
-type InterR = DenseInterleaved[RiceEncoder] // Values for interleaved
+type InterR = DenseInterleaved[*RiceEncoder] // Pointers for interleaved
 type MonoC = DenseMono[*CompactEncoder]
-type InterC = DenseInterleaved[CompactEncoder] // Values for interleaved
+type InterC = DenseInterleaved[*CompactEncoder] // Pointers for interleaved
 // Add more aliases (MonoD, InterD, MonoEF, InterEF, Dual variants) when base types exist
