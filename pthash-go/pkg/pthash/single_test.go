@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
 	"pthashgo/internal/builder"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
@@ -86,7 +85,7 @@ func check[K comparable, F interface {
 
 func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 	log.Println("--- TestInternalSinglePHFBuildAndCheck START ---")
-	
+
 	// Use specific types for testing
 	type K = uint64
 	type H = core.XXHash128Hasher[K] // Hasher type (value)
@@ -96,8 +95,8 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 	seed := uint64(time.Now().UnixNano())
 	numKeysList := []uint64{1000} // Smaller N for debugging
 
-	alphas := []float64{0.98} // Simpler alpha for debugging
-	lambdas := []float64{6.0} // Higher lambda (smaller buckets) for debugging
+	alphas := []float64{0.98}                            // Simpler alpha for debugging
+	lambdas := []float64{6.0}                            // Higher lambda (smaller buckets) for debugging
 	searchTypes := []core.SearchType{core.SearchTypeXOR} // Add SearchTypeAdd when implemented
 
 	for _, numKeys := range numKeysList {
