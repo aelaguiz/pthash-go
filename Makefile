@@ -1,21 +1,34 @@
-.PHONY: build test bench fmt vet clean
+.PHONY: build test bench fmt vet clean all
 
 BINARY_NAME_BUILD=build
 BINARY_NAME_EXAMPLE=example
 CMD_DIR=./cmd
+
+all: fmt vet build test
 
 build:
 	@echo "Building cmd/build..."
 	go build -o $(BINARY_NAME_BUILD) $(CMD_DIR)/build
 	@echo "Building cmd/example..."
 	go build -o $(BINARY_NAME_EXAMPLE) $(CMD_DIR)/example
+	@echo "Building all packages..."
+	go build ./...
 
-# Placeholder test - will fail until tests exist
 test:
 	@echo "Running tests..."
 	go test ./... -v
 
-# Placeholder bench - will fail until benchmarks exist
+# Run tests with race detector
+test-race:
+	@echo "Running tests with race detector..."
+	go test -race ./...
+
+# Run tests with short flag for quicker testing
+test-short:
+	@echo "Running short tests..."
+	go test -short ./...
+
+# Run benchmarks
 bench:
 	@echo "Running benchmarks..."
 	go test ./... -bench=. -benchmem
