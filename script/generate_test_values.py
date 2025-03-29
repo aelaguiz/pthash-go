@@ -10,7 +10,7 @@ def to_u64_pair(val_128):
 
 def format_go_m64(high, low):
     """Formats high, low pair as Go M64 initializer."""
-    return f"core.M64{{0x{low:016x}, 0x{high:016x}}}" # Low, High
+    return f"M64{{0x{low:016x}, 0x{high:016x}}}" # Low, High
 
 # --- New Go Struct Literal Printers ---
 
