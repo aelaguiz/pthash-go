@@ -16,14 +16,14 @@ func Log(verbose bool, format string, args ...any) {
 
 // ProgressLogger tracks and prints progress.
 type ProgressLogger struct {
-	totalEvents     uint64
-	prefix          string
-	suffix          string
-	loggedEvents    uint64
-	logStep         uint64
-	nextEventToLog  uint64
-	enabled         bool
-	startTime       time.Time
+	totalEvents    uint64
+	prefix         string
+	suffix         string
+	loggedEvents   uint64
+	logStep        uint64
+	nextEventToLog uint64
+	enabled        bool
+	startTime      time.Time
 	lastUpdateTime time.Time
 }
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
-	"runtime"
+	"sort"
 	"sync"
 	"time"
 )
@@ -15,15 +15,15 @@ type InternalMemoryBuilderPartitionedPHF[K any, H core.Hasher[K], B core.Buckete
 	seed          uint64
 	numKeys       uint64
 	numPartitions uint64
-	tableSize     uint64          // Total estimated table size across partitions
+	tableSize     uint64             // Total estimated table size across partitions
 	partitioner   core.RangeBucketer // Bucketer used to partition keys
-	hasher        H               // Hasher instance
+	hasher        H                  // Hasher instance
 
 	// Results of the build process (passed to PartitionedPHF.Build)
-	offsets      []uint64                                           // Start offset for each partition's output range
-	subBuilders []*InternalMemoryBuilderSinglePHF[K, H, B] // Builders for each partition's sub-PHF
-	avgPartSize  uint64                                           // Calculated avg partition size
-	numBucketsPerPartition uint64                                  // Calculated for sub-builders
+	offsets                []uint64                                   // Start offset for each partition's output range
+	subBuilders            []*InternalMemoryBuilderSinglePHF[K, H, B] // Builders for each partition's sub-PHF
+	avgPartSize            uint64                                     // Calculated avg partition size
+	numBucketsPerPartition uint64                                     // Calculated for sub-builders
 }
 
 // NewInternalMemoryBuilderPartitionedPHF creates a new partitioned builder.
@@ -274,8 +274,8 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) buildFromHashes(
 		b.taken = core.NewBitVector(0)
 		b.freeSlots = nil
 		var zeroB B
-		b.bucketer = zeroB // Initialize bucketer to zero value
-		_ = b.bucketer.Init(0,0,0,0) // Call init, might be no-op
+		b.bucketer = zeroB              // Initialize bucketer to zero value
+		_ = b.bucketer.Init(0, 0, 0, 0) // Call init, might be no-op
 		return core.BuildTimings{}, nil
 	}
 	b.config = config // Store config
@@ -287,7 +287,7 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) buildFromHashes(
 
 	// Calculate table size and num buckets
 	tableSize := core.MinimalTableSize(numKeys, config.Alpha, config.Search)
-	numBuckets := config.NumBuckets // Use pre-calculated NumBuckets from partitioned builder
+	numBuckets := config.NumBuckets                              // Use pre-calculated NumBuckets from partitioned builder
 	if numBuckets == core.InvalidNumBuckets || numBuckets == 0 { // Basic check
 		return core.BuildTimings{}, fmt.Errorf("invalid number of buckets (%d) provided for sub-build", numBuckets)
 	}
@@ -318,7 +318,9 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) buildFromHashes(
 	}
 	sortFunc := func(i, j int) bool {
 		if config.SecondarySort {
-			if pairs[i].BucketID != pairs[j].BucketID { return pairs[i].BucketID > pairs[j].BucketID }
+			if pairs[i].BucketID != pairs[j].BucketID {
+				return pairs[i].BucketID > pairs[j].BucketID
+			}
 			return pairs[i].Payload < pairs[j].Payload
 		}
 		return pairs[i].Less(pairs[j])
@@ -327,16 +329,14 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) buildFromHashes(
 	pairsBlocks := []pairsT{pairs} // Treat as single block
 	util.Log(config.Verbose, "(Sub) Map+Sort took: %v", time.Since(mapStart))
 
-
 	// --- Merge ---
 	mergeStart := time.Now()
-	bucketsCollector := newBucketsT() // Our merger
+	bucketsCollector := newBucketsT()                                       // Our merger
 	err = merge(pairsBlocks, bucketsCollector, false, config.SecondarySort) // Sub-merge usually not verbose
 	if err != nil {
 		return core.BuildTimings{}, fmt.Errorf("sub-merge failed: %w", err)
 	}
 	util.Log(config.Verbose, "(Sub) Merge took: %v", time.Since(mergeStart))
-
 
 	timings.MappingOrderingMicroseconds = time.Since(mapStart)
 	if config.Verbose {
@@ -389,22 +389,24 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 ) (core.BuildTimings, error) {
 
 	util.Log(config.Verbose, "Building Sub-PHFs...")
-	subPHFConfig := config // Copy config
+	subPHFConfig := config      // Copy config
 	subPHFConfig.Seed = pb.seed // Ensure sub-builders use the same main seed
 	subPHFConfig.NumBuckets = pb.numBucketsPerPartition
 	subPHFConfig.Verbose = false // Quieten sub-builders usually
 	subPHFConfig.NumThreads = 1  // Each sub-build runs sequentially within its thread/goroutine
 
 	var timings core.BuildTimings
-	var totalMappingOrdering, totalSearching time.Duration
+	// var totalMappingOrdering, totalSearching time.Duration
 	numThreads := config.NumThreads
-	if numThreads <= 0 { numThreads = 1}
+	if numThreads <= 0 {
+		numThreads = 1
+	}
 
 	if numThreads > 1 && pb.numPartitions >= uint64(numThreads) {
 		// Parallel build
 		var wg sync.WaitGroup
 		wg.Add(int(pb.numPartitions))
-		errChan := make(chan error, pb.numPartitions) // Buffered channel for errors
+		errChan := make(chan error, pb.numPartitions)                // Buffered channel for errors
 		timingChan := make(chan core.BuildTimings, pb.numPartitions) // Channel for timings
 
 		// Use a semaphore to limit concurrency if needed, or just spawn all
@@ -430,7 +432,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 					// Ensure bucketer is initialized (even if not used)
 					var zeroBucketer B
 					subBuilder.bucketer = zeroBucketer
-					_ = subBuilder.bucketer.Init(0,0,0,0) // Call init on zero value
+					_ = subBuilder.bucketer.Init(0, 0, 0, 0) // Call init on zero value
 
 					timingChan <- core.BuildTimings{} // Send zero timings
 					return
@@ -483,7 +485,6 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 		timings.MappingOrderingMicroseconds = maxMappingOrdering
 		timings.SearchingMicroseconds = maxSearching
 
-
 	} else {
 		// Sequential build
 		for i := uint64(0); i < pb.numPartitions; i++ {
@@ -498,7 +499,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 				subBuilder.seed = subPHFConfig.Seed
 				var zeroBucketer B
 				subBuilder.bucketer = zeroBucketer
-				_ = subBuilder.bucketer.Init(0,0,0,0)
+				_ = subBuilder.bucketer.Init(0, 0, 0, 0)
 				continue
 			}
 
@@ -513,9 +514,12 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 		}
 	}
 
-
 	util.Log(config.Verbose, "Sub-PHF Mapping+Ordering Max/Sum: %v", timings.MappingOrderingMicroseconds)
 	util.Log(config.Verbose, "Sub-PHF Searching Max/Sum: %v", timings.SearchingMicroseconds)
 
 	return timings, nil
+}
+
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) AvgPartitionSize() uint64 {
+	return pb.avgPartSize
 }

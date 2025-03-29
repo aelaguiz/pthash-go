@@ -18,8 +18,8 @@ import (
 type PartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct {
 	seed        uint64
 	numKeys     uint64
-	tableSize   uint64               // Total size estimate across partitions
-	partitioner core.RangeBucketer   // Used to map key hash to partition
+	tableSize   uint64                  // Total size estimate across partitions
+	partitioner core.RangeBucketer      // Used to map key hash to partition
 	partitions  []partition[K, H, B, E] // Slice of sub-PHFs
 	isMinimal   bool
 	searchType  core.SearchType
@@ -28,7 +28,7 @@ type PartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] st
 // partition stores the offset and the sub-PHF for a single partition.
 // Note: K, H, B, E must match the outer struct's types.
 type partition[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct {
-	offset uint64                  // Starting offset for this partition's output range
+	offset uint64                 // Starting offset for this partition's output range
 	phf    *SinglePHF[K, H, B, E] // The actual sub-PHF for this partition
 }
 
@@ -58,7 +58,7 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 	}
 
 	// Build the sub-PHFs (this was added to the builder in this phase)
-	buildTimings, err := pb.BuildSubPHFs(partitionBuffers, *config) // Pass the main config
+	_, err := pb.BuildSubPHFs(partitionBuffers, *config) // Pass the main config
 	if err != nil {
 		return 0, fmt.Errorf("failed to build sub-PHFs: %w", err)
 	}
@@ -75,14 +75,16 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 	offsets := pb.Offsets()
 
 	// --- Create final PHF structures for each partition ---
-	encodeStart := time.Now()
+	// encodeStart := time.Now()
 	var totalEncodingTime time.Duration
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, numPartitions)
 	timingChan := make(chan time.Duration, numPartitions)
 	numThreads := config.NumThreads
-	if numThreads <= 0 { numThreads = 1}
+	if numThreads <= 0 {
+		numThreads = 1
+	}
 	sem := make(chan struct{}, numThreads)
 
 	wg.Add(int(numPartitions))
@@ -96,9 +98,9 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 			subPHF := NewSinglePHF[K, H, B, E](f.isMinimal, f.searchType) // Create empty sub-PHF
 
 			// Pass a sub-config for the build step
-			subConfig := *config // Copy
+			subConfig := *config                           // Copy
 			subConfig.NumBuckets = subBuilder.NumBuckets() // Use actual buckets from sub-builder
-			subConfig.Seed = subBuilder.Seed() // Use sub-builder seed (should match main)
+			subConfig.Seed = subBuilder.Seed()             // Use sub-builder seed (should match main)
 			// Alpha/Lambda less critical here as structure is determined
 
 			encTime, err := subPHF.Build(subBuilder, &subConfig)
@@ -132,7 +134,7 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 	}
 
 	for encTime := range timingChan {
-	    // For parallel encoding, time is max? Or sum? C++ sums it. Let's sum.
+		// For parallel encoding, time is max? Or sum? C++ sums it. Let's sum.
 		totalEncodingTime += encTime
 	}
 
@@ -174,10 +176,10 @@ func (f *PartitionedPHF[K, H, B, E]) Lookup(key K) uint64 {
 }
 
 // --- Accessors ---
-func (f *PartitionedPHF[K, H, B, E]) NumKeys() uint64 { return f.numKeys }
+func (f *PartitionedPHF[K, H, B, E]) NumKeys() uint64   { return f.numKeys }
 func (f *PartitionedPHF[K, H, B, E]) TableSize() uint64 { return f.tableSize } // Note: This is estimated total
-func (f *PartitionedPHF[K, H, B, E]) Seed() uint64    { return f.seed }
-func (f *PartitionedPHF[K, H, B, E]) IsMinimal() bool { return f.isMinimal }
+func (f *PartitionedPHF[K, H, B, E]) Seed() uint64      { return f.seed }
+func (f *PartitionedPHF[K, H, B, E]) IsMinimal() bool   { return f.isMinimal }
 
 // --- Space Calculation ---
 func (f *PartitionedPHF[K, H, B, E]) NumBits() uint64 {

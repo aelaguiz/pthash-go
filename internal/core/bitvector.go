@@ -299,3 +299,11 @@ func (b *BitVectorBuilder) Build() *BitVector {
 	*b = BitVectorBuilder{} // Reset builder state
 	return bv
 }
+
+func (b *BitVectorBuilder) Size() uint64 {
+	return b.size
+}
+
+func (b *BitVectorBuilder) Capacity() uint64 {
+	return b.capacity
+}

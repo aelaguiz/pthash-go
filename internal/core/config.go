@@ -9,7 +9,7 @@ import (
 
 // Constants matching C++ version
 const (
-	InvalidSeed      = uint64(math.MaxUint64)
+	InvalidSeed       = uint64(math.MaxUint64)
 	InvalidNumBuckets = uint64(math.MaxUint64)
 	MinPartitionSize  = 1000
 	MaxPartitionSize  = 5000 // For dense partitioning constraint
@@ -44,22 +44,22 @@ const (
 
 // BuildTimings stores timings for different build stages.
 type BuildTimings struct {
-	PartitioningMicroseconds     time.Duration
+	PartitioningMicroseconds    time.Duration
 	MappingOrderingMicroseconds time.Duration
-	SearchingMicroseconds        time.Duration
-	EncodingMicroseconds         time.Duration
+	SearchingMicroseconds       time.Duration
+	EncodingMicroseconds        time.Duration
 }
 
 // BuildConfig holds parameters for building the PHF.
 type BuildConfig struct {
-	Lambda            float64    // Avg. bucket size
-	Alpha             float64    // Load factor
+	Lambda            float64 // Avg. bucket size
+	Alpha             float64 // Load factor
 	Search            SearchType
-	AvgPartitionSize  uint64     // 0 for single PHF
-	NumBuckets        uint64     // Overrides lambda if set != InvalidNumBuckets
+	AvgPartitionSize  uint64 // 0 for single PHF
+	NumBuckets        uint64 // Overrides lambda if set != InvalidNumBuckets
 	NumThreads        int
-	Seed              uint64     // Use InvalidSeed for random
-	RAM               uint64     // Max RAM to use (bytes)
+	Seed              uint64 // Use InvalidSeed for random
+	RAM               uint64 // Max RAM to use (bytes)
 	TmpDir            string
 	SecondarySort     bool // Used in C++ merge, maybe relevant in Go sort
 	DensePartitioning bool
