@@ -113,20 +113,21 @@ func FastModU64(a uint64, m M64, d uint64) uint64 {
 	// M = [m[1] << 64 | m[0]]
 	// lowbits = (m[1]*a << 64) + m[0]*a
 	p1h, p1l := bits.Mul64(m[0], a) // Low part product
-	p0h, _ := bits.Mul64(m[1], a)   // High part product (only need lower 64 bits, p0l is discarded)
+	p0h, p0l := bits.Mul64(m[1], a) // High part product
 
 	// Add the high part of the low product to the low part of the high product
 	// lowbits_lo = p1l
-	// lowbits_hi = p1h + p0h (with carry)
-	lowbits_hi, _ := bits.Add64(p1h, p0h, 0)
+	// lowbits_hi = p1h + p0l (with carry)
+	lowbits_hi, _ := bits.Add64(p1h, p0l, 0)
+	lowbits_lo := p1l
 
 	// If there was a carry when calculating lowbits_hi, it's part of the bits
 	// above the 128 we need, so we ignore it.
-	// lowbits = [lowbits_hi << 64 | p1l] (conceptually)
+	// lowbits = [lowbits_hi << 64 | lowbits_lo] (conceptually)
 
 	// Now compute mul128_u64(lowbits, d) which needs high 64 bits of lowbits * d
-	// lowbits is [lowbits_hi, p1l]
-	return mul128_u64(lowbits_hi, p1l, d)
+	// lowbits is [lowbits_hi, lowbits_lo]
+	return mul128_u64(lowbits_hi, lowbits_lo, d)
 }
 
 // FastDivU64 computes (a / d) given precomputed M (128-bit) for d > 1.
