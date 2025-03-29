@@ -11,6 +11,7 @@ import (
 
 // DistinctUints64 generates numKeys distinct uint64 values using the given seed.
 func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
+	log.Println("DistinctUints64 START")
 	if numKeys == 0 {
 		return []uint64{}
 	}
@@ -41,9 +42,11 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 	for i := range keys {
 		keys[i] = rng.Uint64()
 	}
+	log.Println("DistinctUints64: Generated random numbers")
 
 	Log(true, "Sorting and finding unique numbers...")
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	log.Println("DistinctUints64: Sorted")
 
 	// In-place unique
 	uniqueCount := 0
@@ -57,11 +60,13 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 		}
 	}
 	keys = keys[:uniqueCount] // Keep only unique keys found so far
+	log.Printf("DistinctUints64: Initial unique count = %d", uniqueCount)
 
 	Log(true, "Found %d unique keys initially.", uniqueCount)
 
 	// Fill gaps if needed (unlikely for large random uint64 space, but matches C++)
 	if uint64(uniqueCount) < numKeys {
+		log.Println("DistinctUints64: Entering gap fill logic")
 		log.Printf("Warning: Needed to fill gaps to reach %d keys (had %d)", numKeys, uniqueCount)
 		needed := numKeys - uint64(uniqueCount)
 		keys = append(keys, make([]uint64, needed)...) // Allocate space for missing keys
@@ -82,6 +87,7 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 		if uniqueCount > 0 {
 			lastVal = keys[uniqueCount-1]
 		}
+		log.Println("DistinctUints64: Entering trailing fill logic")
 		for uint64(currentIdx) < numKeys {
 			lastVal++ // Note: Potential for overflow if lastVal was MaxUint64
 			// Very basic check to avoid immediate duplicate of the very last element if gaps failed
@@ -91,6 +97,7 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 			keys[currentIdx] = lastVal
 			currentIdx++
 		}
+		log.Println("DistinctUints64: Finished trailing fill logic, re-sorting/uniquing")
 		// We might have duplicates if we added sequentially, re-unique and trim
 		sort.Slice(keys[:currentIdx], func(i, j int) bool { return keys[i] < keys[j] })
 		finalUniqueCount := 0
@@ -118,9 +125,11 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 		// Had enough or more unique keys initially
 		keys = keys[:numKeys] // Trim to exactly numKeys
 	}
+	log.Println("DistinctUints64: Final key count =", len(keys))
 
 	Log(true, "Shuffling final %d keys...", len(keys))
 	rng.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
+	log.Println("DistinctUints64: Shuffled")
 
 	Log(true, "Key generation complete.")
 	return keys

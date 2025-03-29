@@ -2,6 +2,7 @@ package pthash_test
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"pthashgo/internal/builder"
@@ -84,6 +85,8 @@ func check[K comparable, F interface {
 // --- Test Function ---
 
 func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
+	log.Println("--- TestInternalSinglePHFBuildAndCheck START ---")
+	
 	// Use specific types for testing
 	type K = uint64
 	type H = core.XXHash128Hasher[K] // Hasher type (value)
