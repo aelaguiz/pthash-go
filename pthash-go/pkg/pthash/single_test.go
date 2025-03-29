@@ -87,8 +87,8 @@ func check[K comparable, F interface {
 func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 	// Use specific types for testing
 	type K = uint64
-	type H = core.XXHash128Hasher[K]
-	type B = core.SkewBucketer
+	type H = core.XXHash128Hasher[K] // Hasher type (value)
+	type B = core.SkewBucketer      // Bucketer type (value)
 	type E = core.RiceEncoder
 
 	seed := uint64(time.Now().UnixNano())
@@ -123,9 +123,10 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 
 								// Create hasher and bucketer instances
 								hasher := core.NewXXHash128Hasher[K]()
-								var bucketer B // Zero value is okay if Init doesn't rely on prior state
+								// Instantiate Bucketer as a pointer type since its methods have pointer receivers
+								var bucketer *B = new(B) // Create a pointer to a zero B
 
-								builder := builder.NewInternalMemoryBuilderSinglePHF[K, H, B](hasher, bucketer)
+								builder := builder.NewInternalMemoryBuilderSinglePHF[K, H, *B](hasher, bucketer) // Pass pointer type *B to generic
 
 								_, err := builder.BuildFromKeys(keys, config)
 								if err != nil {
@@ -138,7 +139,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								}
 
 								// Build the actual PHF structure from the builder
-								phf := pthash.NewSinglePHF[K, H, B, E](minimal, searchType)
+								phf := pthash.NewSinglePHF[K, H, *B, E](minimal, searchType) // Pass pointer type *B to generic
 								encodeTime, err := phf.Build(builder, &config)
 								if err != nil {
 									t.Fatalf("phf.Build failed: %v", err)
