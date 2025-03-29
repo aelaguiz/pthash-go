@@ -99,3 +99,87 @@ func TestRiceSequenceRoundtrip(t *testing.T) {
 
 // TODO: Add tests for CompactVector/CompactEncoder when implemented.
 // TODO: Add tests for D1Array when implemented.
+
+// Helper to ensure CompactEncoder is functional enough for DiffEncoder tests
+func createTestCompactEncoder(values []uint64) (*CompactEncoder, error) {
+	enc := &CompactEncoder{}
+	err := enc.Encode(values)
+	// Skip test if underlying encoder is not ready
+	if err != nil && err.Error() == "CompactEncoder.Encode: CompactVector not implemented" {
+		return nil, err // Propagate skip signal
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to create test compact encoder: %w", err) // Real error
+	}
+	return enc, nil
+}
+
+func TestDiffEncoderRoundtrip(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    []uint64
+		increment uint64
+	}{
+		{"Empty", []uint64{}, 10},
+		{"Zeroes", []uint64{0, 0, 0}, 0},
+		{"Constant", []uint64{5, 5, 5, 5}, 0},
+		{"Arithmetic", []uint64{0, 10, 20, 30, 40}, 10},
+		{"ArithmeticNeg", []uint64{40, 30, 20, 10, 0}, 10}, // Will have negative diffs
+		{"MixedIncr", []uint64{0, 5, 15, 20, 35}, 10},      // Increment doesn't match diffs
+		{"LargeValues", []uint64{1 << 40, (1 << 40) + 50, (1 << 40) + 55}, 20},
+	}
+
+	// Add random case
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	n := 50
+	incrRand := uint64(rng.Int63n(100) + 1)
+	valsRand := make([]uint64, n)
+	current := uint64(rng.Int63n(1000))
+	for i := 0; i < n; i++ {
+		// Add some noise around the increment
+		delta := int64(incrRand) + rng.Int63n(int64(incrRand)+10) - int64(incrRand/2+5)
+		if int64(current)+delta < 0 {
+			current = 0 // Avoid wrapping below zero
+		} else {
+			current = uint64(int64(current) + delta)
+		}
+		valsRand[i] = current
+	}
+	tests = append(tests, struct {
+		name      string
+		values    []uint64
+		increment uint64
+	}{"Random", valsRand, incrRand})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Use CompactEncoder as the underlying encoder for testing Diff logic
+			// Note: This requires CompactEncoder.Encode/Access to be functional.
+			var diffEnc DiffEncoder[*CompactEncoder] // Use pointer type here
+
+			err := diffEnc.Encode(tt.values, tt.increment)
+			if err != nil {
+				// Check if it was the expected "not implemented" error from CompactEncoder
+				if err.Error() == "CompactEncoder.Encode: CompactVector not implemented" {
+					t.Logf("Skipping test %s: CompactEncoder dependency not fully implemented.", tt.name)
+					t.SkipNow()
+				}
+				t.Fatalf("DiffEncoder.Encode failed: %v", err)
+			}
+
+			if diffEnc.Size() != uint64(len(tt.values)) {
+				t.Fatalf("Size mismatch: got %d, want %d", diffEnc.Size(), len(tt.values))
+			}
+			if diffEnc.Increment != tt.increment {
+				t.Fatalf("Increment mismatch: got %d, want %d", diffEnc.Increment, tt.increment)
+			}
+
+			for i, expected := range tt.values {
+				got := diffEnc.Access(uint64(i))
+				if got != expected {
+					t.Errorf("Access(%d): got %d, want %d", i, got, expected)
+					// break // Optional: Stop on first error
+				}
+			}
+		})
+	}
+}
