@@ -138,7 +138,7 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 	type B = core.SkewBucketer // Sub-builder bucketer
 	type E = core.RiceEncoder  // Sub-builder encoder
 
-	numKeys := uint64(5000) // Small number of keys, but ensure partitioning
+	numKeys := uint64(5000)     // Small number of keys, but ensure partitioning
 	avgPartSize := uint64(1000) // Should create ~5 partitions
 	seed := uint64(time.Now().UnixNano())
 	keys := util.DistinctUints64(numKeys, seed)
@@ -149,11 +149,11 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 	config := core.DefaultBuildConfig()
 	config.Alpha = 0.94
 	config.Lambda = 5.0
-	config.Minimal = true // Test minimal case
+	config.Minimal = true              // Test minimal case
 	config.Search = core.SearchTypeAdd // Test Additive
 	config.Verbose = false
 	config.NumThreads = 2 // Use a couple of threads for partitioned build
-	config.Seed = 654321 // Fixed seed
+	config.Seed = 654321  // Fixed seed
 	config.AvgPartitionSize = avgPartSize
 	config.DensePartitioning = false // Not dense
 
@@ -195,13 +195,22 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 	}
 
 	// --- Compare ---
-	if phf1.Seed() != phf2.Seed() { t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed()) }
-	if phf1.NumKeys() != phf2.NumKeys() { t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys()) }
-	if phf1.TableSize() != phf2.TableSize() { t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize()) }
-	if phf1.IsMinimal() != phf2.IsMinimal() { t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal()) }
+	if phf1.Seed() != phf2.Seed() {
+		t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed())
+	}
+	if phf1.NumKeys() != phf2.NumKeys() {
+		t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys())
+	}
+	if phf1.TableSize() != phf2.TableSize() {
+		t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize())
+	}
+	if phf1.IsMinimal() != phf2.IsMinimal() {
+		t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal())
+	}
 	// Cannot easily compare f.partitions directly, rely on lookup check
-	if phf1.NumBits() != phf2.NumBits() { t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())}
-
+	if phf1.NumBits() != phf2.NumBits() {
+		t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())
+	}
 
 	// Compare a lookup (basic functional check)
 	if !(config.Minimal && core.IsEliasFanoStubbed()) {

@@ -332,8 +332,8 @@ func TestSinglePHFSerialization(t *testing.T) {
 	// Use a simple, known-good configuration for testing serialization structure
 	type K = uint64
 	type H = core.MurmurHash2_64Hasher[K] // Use Murmur as it's simpler
-	type B = core.SkewBucketer           // Skew is relatively simple
-	type E = core.RiceEncoder            // Rice needs D1Array/CompactVector stubs/impl
+	type B = core.SkewBucketer            // Skew is relatively simple
+	type E = core.RiceEncoder             // Rice needs D1Array/CompactVector stubs/impl
 
 	numKeys := uint64(500) // Small number of keys
 	seed := uint64(uint64(time.Now().UnixNano()))
@@ -349,7 +349,7 @@ func TestSinglePHFSerialization(t *testing.T) {
 	config.Search = core.SearchTypeXOR
 	config.Verbose = false
 	config.NumThreads = 1 // Keep it simple for serialization test
-	config.Seed = 123456 // Fixed seed
+	config.Seed = 123456  // Fixed seed
 
 	// --- Build the PHF ---
 	hasher := core.NewMurmurHash2_64Hasher[K]()
@@ -390,12 +390,24 @@ func TestSinglePHFSerialization(t *testing.T) {
 	}
 
 	// --- Compare ---
-	if phf1.Seed() != phf2.Seed() { t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed()) }
-	if phf1.NumKeys() != phf2.NumKeys() { t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys()) }
-	if phf1.TableSize() != phf2.TableSize() { t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize()) }
-	if phf1.IsMinimal() != phf2.IsMinimal() { t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal()) }
-	if phf1.SearchType() != phf2.SearchType() { t.Errorf("SearchType mismatch: %v != %v", phf1.SearchType(), phf2.SearchType()) }
-	if phf1.NumBits() != phf2.NumBits() { t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())}
+	if phf1.Seed() != phf2.Seed() {
+		t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed())
+	}
+	if phf1.NumKeys() != phf2.NumKeys() {
+		t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys())
+	}
+	if phf1.TableSize() != phf2.TableSize() {
+		t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize())
+	}
+	if phf1.IsMinimal() != phf2.IsMinimal() {
+		t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal())
+	}
+	if phf1.SearchType() != phf2.SearchType() {
+		t.Errorf("SearchType mismatch: %v != %v", phf1.SearchType(), phf2.SearchType())
+	}
+	if phf1.NumBits() != phf2.NumBits() {
+		t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())
+	}
 
 	// Compare a lookup (basic functional check)
 	// Skip if EliasFano is needed but stubbed

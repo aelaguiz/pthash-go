@@ -29,20 +29,36 @@ These functions are valuable for:
 
 ## Current Development Status
 
-**Status:** Partial Implementation (Internal Memory Core Complete, Advanced Features Missing/Incomplete)
+**Status:** Significant progress: Core internal memory features ported, but key components are missing, incomplete, or require performance optimization and correctness verification.
 
-This Go port has successfully translated the core structure and logic for building **internal memory** single, partitioned, and dense partitioned (PHOBIC) minimal perfect hash functions. Foundational elements like hashing, bucketing, configuration, basic bit manipulation, and the overall build flow are implemented.
+This Go port has successfully translated the core structure and logic for building **internal memory** single, partitioned, and dense partitioned (PHOBIC) minimal perfect hash functions. Foundational elements like hashing, bucketing, configuration, basic bit manipulation (`BitVector`, `CompactVector`), the build flow (`internal/builder`), and PHF types (`pkg/pthash`) are implemented. Unit and integration tests cover many of these components.
 
-However, several key areas are **incomplete, placeholders, or require further verification/refinement**:
+However, several critical areas require attention:
 
-*   **External Memory:** Construction in external memory is **not implemented**.
-*   **Advanced Encoders:** Several encoding strategies from the C++ version are missing (`Dictionary`, `SDC`, `PartitionedCompact`, `Dual` wrappers like `R-R`, `D-D`, `C-C`, etc.). Dense Dual encoders are also missing.
-*   **Elias-Fano Encoder:** Currently a placeholder. This prevents the `freeSlots` mechanism needed for **minimal** PHFs from functioning correctly, although the build process completes. Minimal PHF lookups will panic if they need to access free slots.
-*   **Rank/Select (`D1Array`):** The current implementation uses slow linear scans for `Select`, making encoders that depend on it (like `RiceEncoder`) **functionally correct but extremely slow**. This needs replacement with an efficient implementation.
-*   **Additive Search (`SearchTypeAdd`):** The parallel version is missing. The sequential version is implemented, but its numerical precision compared to C++ needs verification, especially for large table sizes.
-*   **Parallel XOR Search:** The current parallel XOR search (`searchParallelXOR`) attempts to mirror a complex C++ retry/locking strategy and may be prone to **race conditions, deadlocks, or suboptimal performance**. It requires rigorous testing (`go test -race ./...`) and potentially a rewrite using more idiomatic Go concurrency patterns.
-*   **Serialization:** While the `MarshalBinary`/`UnmarshalBinary` structure exists for PHF types, many underlying components (encoders, complex bucketers, `CompactVector`, `D1Array`, etc.) have incomplete implementations, preventing full serialization/deserialization.
-*   **Tooling & Benchmarking:** The `cmd/build` tool is a basic placeholder, and the example (`cmd/example`) is minimal. Benchmarking infrastructure and the result table generation script are not ported.
+*   **Missing Features:**
+    *   **External Memory:** Construction in external memory is **not implemented**.
+    *   **Advanced Encoders:** Key encoders from C++ are missing: `Dictionary`, `SDC`, `PartitionedCompact`, `Dual` wrappers (e.g., `RiceRice`, `CompactCompact`), and Dense Dual variants.
+    *   **Parallel Additive Search:** `searchParallelAdd` is missing.
+
+*   **Performance Bottlenecks:**
+    *   **Rank/Select (`D1Array`):** The `Select` implementation uses slow linear scans, making dependent encoders (`RiceEncoder`, `EliasFano`) **functionally correct but extremely slow**. This is a major bottleneck requiring an optimized implementation (e.g., broadword techniques).
+    *   **Fastmod (`FastModU64`):** The 64-bit implementation, while aiming for correctness, may be slower than C++ intrinsics and needs performance/precision verification against C++.
+
+*   **Concurrency Concerns:**
+    *   **Parallel XOR Search (`searchParallelXOR`):** The current mutex-based implementation attempts to mirror complex C++ logic but is **highly questionable under contention** and may have race conditions or deadlocks. It needs rigorous testing (`go test -race ./...`) and likely a rewrite using more idiomatic Go concurrency patterns (e.g., channels, sharded locks).
+
+*   **Incompleteness & Verification:**
+    *   **Serialization:** While top-level types have marshal methods, many underlying components (`D1Array`, advanced encoders, possibly complex bucketers) have incomplete or untested serialization, preventing robust save/load.
+    *   **Elias-Fano Encoder:** While structurally present, its dependency on the slow `D1Array.Select` limits its usability, particularly for the `freeSlots` mechanism needed for truly minimal PHFs.
+    *   **Additive Search Precision:** Potential precision issues for large table sizes need verification.
+    *   **Hasher Differences:** Minor differences in seeding (`XXHash128Hasher`) compared to C++ might exist.
+    *   **Generics/Reflection:** Use of reflection for generic instantiation (`TableBucketer`) adds some overhead.
+
+*   **Tooling & Benchmarking:**
+    *   The `cmd/build` and `cmd/example` tools are basic placeholders.
+    *   Benchmarking infrastructure and comparison scripts (`make_markdown_table.py`) are not ported.
+
+**In summary:** The internal memory core is functional but requires significant work on performance (esp. `D1Array.Select`), concurrency correctness (`searchParallelXOR`), feature completeness (external memory, encoders), and tooling to be a fully equivalent and robust port of the C++ PTHash library.
 
 ## Building
 

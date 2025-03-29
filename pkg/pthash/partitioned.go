@@ -261,8 +261,8 @@ func (f *PartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	// 3. Calculate total size
 	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 // magic, version, flags, reserved, core params
 	totalSize := headerSize
-	totalSize += 8 + len(partitionerData) // partitioner len+data
-	totalSize += 8                        // numPartitions
+	totalSize += 8 + len(partitionerData)                        // partitioner len+data
+	totalSize += 8                                               // numPartitions
 	totalSize += len(f.partitions)*(8+8) + totalPartitionDataLen // offsets + lengths + data
 
 	buf := make([]byte, totalSize)
@@ -353,10 +353,14 @@ func (f *PartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	offset += 8
 
 	// 3. Read Partitioner
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	partitionerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+partitionerLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	if uint64(offset)+partitionerLen > uint64(len(data)) {
+		return io.ErrUnexpectedEOF
+	}
 	f.partitioner = &core.RangeBucketer{} // Create instance
 	err := serial.TryUnmarshal(f.partitioner, data[offset:offset+int(partitionerLen)])
 	if err != nil {
@@ -365,18 +369,24 @@ func (f *PartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	offset += int(partitionerLen)
 
 	// 4. Read Partitions
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	numPartitions := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
 	f.partitions = make([]partition[K, H, B, E], numPartitions)
 
 	for i := uint64(0); i < numPartitions; i++ {
-		if offset+8+8 > len(data) { return io.ErrUnexpectedEOF } // offset + phfLen
+		if offset+8+8 > len(data) {
+			return io.ErrUnexpectedEOF
+		} // offset + phfLen
 		f.partitions[i].offset = binary.LittleEndian.Uint64(data[offset : offset+8])
 		offset += 8
 		phfLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 		offset += 8
-		if uint64(offset)+phfLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+		if uint64(offset)+phfLen > uint64(len(data)) {
+			return io.ErrUnexpectedEOF
+		}
 
 		// Create a new sub-PHF instance and unmarshal into it
 		subPHF := NewSinglePHF[K, H, B, E](f.isMinimal, f.searchType) // Create with matching params

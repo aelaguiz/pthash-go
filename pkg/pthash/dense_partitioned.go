@@ -4,13 +4,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"pthashgo/internal/builder"
 	"pthashgo/internal/core"
 	"pthashgo/internal/serial" // Use centralized helpers
 	"pthashgo/internal/util"
 	"time"
-	"unsafe"
 )
 
 // DensePartitionedPHF implements the densely partitioned PHF (PHOBIC).
@@ -231,7 +229,6 @@ func (f *DensePartitionedPHF[K, H, B, E]) OffsetsNotImplemented() bool {
 	return f.offsets != nil && f.offsets.NumBits() == 0 // Example stub check
 }
 
-
 // --- Serialization ---
 
 const densePartitionedPHFMagic = "DPHF"
@@ -240,17 +237,27 @@ const densePartitionedPHFMagic = "DPHF"
 func (f *DensePartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	// 1. Marshal components
 	partitionerData, err := serial.TryMarshal(f.partitioner)
-	if err != nil { return nil, fmt.Errorf("marshal partitioner: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("marshal partitioner: %w", err)
+	}
 	subBucketerData, err := serial.TryMarshal(f.subBucketer)
-	if err != nil { return nil, fmt.Errorf("marshal subBucketer: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("marshal subBucketer: %w", err)
+	}
 	pilotsData, err := serial.TryMarshal(f.pilots)
-	if err != nil { return nil, fmt.Errorf("marshal pilots: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("marshal pilots: %w", err)
+	}
 	offsetsData, err := serial.TryMarshal(f.offsets)
-	if err != nil { return nil, fmt.Errorf("marshal offsets: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("marshal offsets: %w", err)
+	}
 	freeSlotsData := []byte{}
 	if f.freeSlots != nil {
 		freeSlotsData, err = serial.TryMarshal(f.freeSlots)
-		if err != nil { return nil, fmt.Errorf("marshal freeSlots: %w", err) }
+		if err != nil {
+			return nil, fmt.Errorf("marshal freeSlots: %w", err)
+		}
 	}
 
 	// 2. Calculate size
@@ -270,24 +277,36 @@ func (f *DensePartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	// 3. Write Header
 	copy(buf[offset:offset+4], []byte(densePartitionedPHFMagic))
 	offset += 4
-	buf[offset] = 1; offset += 1 // Version
+	buf[offset] = 1
+	offset += 1 // Version
 	flags := byte(0)
-	if f.isMinimal { flags |= 1 }
+	if f.isMinimal {
+		flags |= 1
+	}
 	flags |= (byte(f.searchType) << 1)
-	buf[offset] = flags; offset += 1
-	binary.LittleEndian.PutUint16(buf[offset:offset+2], 0); offset += 2 // Reserved
+	buf[offset] = flags
+	offset += 1
+	binary.LittleEndian.PutUint16(buf[offset:offset+2], 0)
+	offset += 2 // Reserved
 
 	// 4. Write Core
-	binary.LittleEndian.PutUint64(buf[offset:], f.seed); offset += 8
-	binary.LittleEndian.PutUint64(buf[offset:], f.numKeys); offset += 8
-	binary.LittleEndian.PutUint64(buf[offset:], f.tableSize); offset += 8
-	binary.LittleEndian.PutUint64(buf[offset:], f.numPartitions); offset += 8
-	binary.LittleEndian.PutUint64(buf[offset:], f.numBucketsPerPartition); offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], f.seed)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], f.numKeys)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], f.tableSize)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], f.numPartitions)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], f.numBucketsPerPartition)
+	offset += 8
 
 	// 5. Write Components
 	putComponent := func(data []byte) {
-		binary.LittleEndian.PutUint64(buf[offset:], uint64(len(data))); offset += 8
-		copy(buf[offset:], data); offset += len(data)
+		binary.LittleEndian.PutUint64(buf[offset:], uint64(len(data)))
+		offset += 8
+		copy(buf[offset:], data)
+		offset += len(data)
 	}
 	putComponent(partitionerData)
 	putComponent(subBucketerData)
@@ -304,33 +323,51 @@ func (f *DensePartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (f *DensePartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	headerSize := 8 + 40
-	if len(data) < headerSize { return io.ErrUnexpectedEOF }
+	if len(data) < headerSize {
+		return io.ErrUnexpectedEOF
+	}
 	offset := 0
 
 	// 1. Read Header
-	if string(data[offset:offset+4]) != densePartitionedPHFMagic { return fmt.Errorf("invalid magic") }
+	if string(data[offset:offset+4]) != densePartitionedPHFMagic {
+		return fmt.Errorf("invalid magic")
+	}
 	offset += 4
-	version := data[offset]; offset += 1
-	if version != 1 { return fmt.Errorf("unsupported version %d", version) }
-	flags := data[offset]; offset += 1
+	version := data[offset]
+	offset += 1
+	if version != 1 {
+		return fmt.Errorf("unsupported version %d", version)
+	}
+	flags := data[offset]
+	offset += 1
 	f.isMinimal = (flags & 1) != 0
 	f.searchType = core.SearchType((flags >> 1) & 3)
 	offset += 2 // Reserved
 
 	// 2. Read Core
-	f.seed = binary.LittleEndian.Uint64(data[offset:]); offset += 8
-	f.numKeys = binary.LittleEndian.Uint64(data[offset:]); offset += 8
-	f.tableSize = binary.LittleEndian.Uint64(data[offset:]); offset += 8
-	f.numPartitions = binary.LittleEndian.Uint64(data[offset:]); offset += 8
-	f.numBucketsPerPartition = binary.LittleEndian.Uint64(data[offset:]); offset += 8
+	f.seed = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	f.numKeys = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	f.tableSize = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	f.numPartitions = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	f.numBucketsPerPartition = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
 
 	// 3. Read Components
 	var err error
 	readComponent := func(target interface{}) error {
-		if offset+8 > len(data) { return io.ErrUnexpectedEOF }
-		compLen := binary.LittleEndian.Uint64(data[offset:]); offset += 8
+		if offset+8 > len(data) {
+			return io.ErrUnexpectedEOF
+		}
+		compLen := binary.LittleEndian.Uint64(data[offset:])
+		offset += 8
 		endOffset := offset + int(compLen)
-		if endOffset > len(data) { return io.ErrUnexpectedEOF }
+		if endOffset > len(data) {
+			return io.ErrUnexpectedEOF
+		}
 		err := serial.TryUnmarshal(target, data[offset:endOffset])
 		offset = endOffset
 		return err
@@ -338,22 +375,37 @@ func (f *DensePartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 
 	// Need to initialize pointer fields before unmarshaling into them
 	f.partitioner = &core.RangeBucketer{}
-	if err = readComponent(f.partitioner); err != nil { return fmt.Errorf("unmarshal partitioner: %w", err) }
+	if err = readComponent(f.partitioner); err != nil {
+		return fmt.Errorf("unmarshal partitioner: %w", err)
+	}
 	// Cannot directly unmarshal into generic B/E/DiffEncoder - assume zero value target is okay
-	if err = readComponent(&f.subBucketer); err != nil { return fmt.Errorf("unmarshal subBucketer: %w", err) }
-	if err = readComponent(&f.pilots); err != nil { return fmt.Errorf("unmarshal pilots: %w", err) }
+	if err = readComponent(&f.subBucketer); err != nil {
+		return fmt.Errorf("unmarshal subBucketer: %w", err)
+	}
+	if err = readComponent(&f.pilots); err != nil {
+		return fmt.Errorf("unmarshal pilots: %w", err)
+	}
 	f.offsets = &core.DiffEncoder[*core.CompactEncoder]{} // Initialize pointer
-	if err = readComponent(f.offsets); err != nil { return fmt.Errorf("unmarshal offsets: %w", err) }
+	if err = readComponent(f.offsets); err != nil {
+		return fmt.Errorf("unmarshal offsets: %w", err)
+	}
 
 	// Read free slots length separately to know if we need to allocate
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
-	freeSlotsLen := binary.LittleEndian.Uint64(data[offset:]); offset += 8
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	freeSlotsLen := binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
 	endOffset := offset + int(freeSlotsLen)
-	if endOffset > len(data) { return io.ErrUnexpectedEOF }
+	if endOffset > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	if freeSlotsLen > 0 {
 		f.freeSlots = core.NewEliasFano()
 		err = serial.TryUnmarshal(f.freeSlots, data[offset:endOffset])
-		if err != nil { return fmt.Errorf("unmarshal freeSlots: %w", err) }
+		if err != nil {
+			return fmt.Errorf("unmarshal freeSlots: %w", err)
+		}
 	} else {
 		f.freeSlots = nil
 	}

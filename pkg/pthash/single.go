@@ -1,7 +1,6 @@
 package pthash
 
 import (
-	"encoding"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -220,7 +219,7 @@ func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	}
 
 	// 2. Calculate total size
-	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 16 // magic, version, flags, reserved, core params
+	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 16                                           // magic, version, flags, reserved, core params
 	totalSize := headerSize + 8 + len(bucketerData) + 8 + len(pilotsData) + 8 + len(freeSlotsData) // len + data for components
 	buf := make([]byte, totalSize)
 	offset := 0
@@ -302,7 +301,7 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	flags := data[offset]
 	f.isMinimal = (flags & 1) != 0
 	f.searchType = core.SearchType((flags >> 1) & 3) // Extract search type bits
-	offset += 1 + 1 + 1 // flags + reserved
+	offset += 1 + 1 + 1                              // flags + reserved
 
 	// 2. Read Core Params
 	f.seed = binary.LittleEndian.Uint64(data[offset : offset+8])
@@ -319,10 +318,14 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	offset += 8 // High
 
 	// 3. Read Bucketer
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	bucketerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+bucketerLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	if uint64(offset)+bucketerLen > uint64(len(data)) {
+		return io.ErrUnexpectedEOF
+	}
 	// Unmarshal into the existing f.bucketer (assuming it's addressable or pointer)
 	err := serial.TryUnmarshal(&f.bucketer, data[offset:offset+int(bucketerLen)])
 	if err != nil {
@@ -331,10 +334,14 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	offset += int(bucketerLen)
 
 	// 4. Read Pilots
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	pilotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+pilotsLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	if uint64(offset)+pilotsLen > uint64(len(data)) {
+		return io.ErrUnexpectedEOF
+	}
 	err = serial.TryUnmarshal(&f.pilots, data[offset:offset+int(pilotsLen)])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal pilots: %w", err)
@@ -342,10 +349,14 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	offset += int(pilotsLen)
 
 	// 5. Read Free Slots
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	freeSlotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+freeSlotsLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	if uint64(offset)+freeSlotsLen > uint64(len(data)) {
+		return io.ErrUnexpectedEOF
+	}
 	if freeSlotsLen > 0 {
 		f.freeSlots = core.NewEliasFano() // Create instance before unmarshaling
 		err = serial.TryUnmarshal(f.freeSlots, data[offset:offset+int(freeSlotsLen)])
@@ -357,7 +368,6 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 		f.freeSlots = nil // Explicitly set nil if length is 0
 	}
 	offset += int(freeSlotsLen)
-
 
 	if offset != len(data) {
 		return fmt.Errorf("extra data detected after unmarshaling (%d bytes remain)", len(data)-offset)

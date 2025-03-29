@@ -237,15 +237,3 @@ func TestDensePHFSerialization(t *testing.T) {
 		t.Log("Skipping lookup check due to stubbed EliasFano/Offsets for minimal dense PHF.")
 	}
 }
-
-// Helper to check if D1Array.Select is likely stubbed (e.g., returns constant)
-// This is brittle, ideally D1Array would have an IsStubbed method.
-func (ef *core.EliasFano) IsStubbed() bool {
-	// A simple check: if NumBits is always 0 for a non-empty structure, it's likely a stub.
-	// Let's encode a single value and check NumBits.
-	tempEF := core.NewEliasFano()
-	_ = tempEF.Encode([]uint64{10})
-	// A real EF should use more bits than just the base field sizes (~24 bytes = 192 bits)
-	// A stub might only marshal the metadata. Let's use a threshold like 64 bytes = 512 bits.
-	return tempEF.NumBits() < 512
-}
