@@ -1,7 +1,9 @@
 package core
 
 import (
+	"encoding"
 	"fmt"
+	"io"
 	"math"
 	"math/bits"
 )
@@ -16,6 +18,9 @@ type Bucketer interface {
 	NumBuckets() uint64
 	// NumBits returns the size of the bucketer's internal state in bits.
 	NumBits() uint64
+	// Add serialization methods
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
 	// TODO: Add serialization methods (e.g., MarshalBinary, UnmarshalBinary) later.
 }
 
@@ -91,6 +96,18 @@ func (b *SkewBucketer) NumBits() uint64 {
 	return (8 + 8 + 16 + 16) * 8
 }
 
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (b *SkewBucketer) MarshalBinary() ([]byte, error) {
+	// TODO: Serialize numDenseBuckets, numSparseBuckets, mNumDenseBuckets, mNumSparseBuckets
+	return nil, fmt.Errorf("SkewBucketer.MarshalBinary not implemented")
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (b *SkewBucketer) UnmarshalBinary(data []byte) error {
+	// TODO: Deserialize fields
+	return fmt.Errorf("SkewBucketer.UnmarshalBinary not implemented")
+}
+
 // --- UniformBucketer Implementation ---
 
 // UniformBucketer assigns hashes uniformly across buckets using fastmod.
@@ -124,6 +141,18 @@ func (b *UniformBucketer) NumBuckets() uint64 {
 func (b *UniformBucketer) NumBits() uint64 {
 	// sizeof(uint64) + sizeof(M64)
 	return (8 + 16) * 8
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (b *UniformBucketer) MarshalBinary() ([]byte, error) {
+	// TODO: Serialize numBuckets and mNumBuckets
+	return nil, fmt.Errorf("UniformBucketer.MarshalBinary not implemented") 
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (b *UniformBucketer) UnmarshalBinary(data []byte) error {
+	// TODO: Deserialize fields
+	return fmt.Errorf("UniformBucketer.UnmarshalBinary not implemented")
 }
 
 // --- RangeBucketer Implementation (for partitioning) ---
@@ -163,6 +192,20 @@ func (b *RangeBucketer) NumBits() uint64 {
 	return 8 * 8
 }
 
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (b *RangeBucketer) MarshalBinary() ([]byte, error) {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, b.numBuckets)
+	return buf, nil
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (b *RangeBucketer) UnmarshalBinary(data []byte) error {
+	if len(data) < 8 { return io.ErrUnexpectedEOF }
+	b.numBuckets = binary.LittleEndian.Uint64(data)
+	return nil
+}
+
 // --- OptBucketer / TableBucketer (Placeholders for later phases) ---
 type OptBucketer struct {
 	// TODO in Phase 7+
@@ -170,6 +213,14 @@ type OptBucketer struct {
 
 func (b *OptBucketer) Init(numBuckets uint64, lambda float64, tableSize uint64, alpha float64) error {
 	return fmt.Errorf("OptBucketer not implemented")
+}
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (b *OptBucketer) MarshalBinary() ([]byte, error) { 
+	return nil, fmt.Errorf("OptBucketer.MarshalBinary not implemented") 
+}
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (b *OptBucketer) UnmarshalBinary(data []byte) error { 
+	return fmt.Errorf("OptBucketer.UnmarshalBinary not implemented") 
 }
 func (b *OptBucketer) Bucket(hash uint64) BucketIDType { return 0 }
 func (b *OptBucketer) NumBuckets() uint64              { return 0 }
@@ -181,6 +232,14 @@ type TableBucketer struct {
 
 func (b *TableBucketer) Init(numBuckets uint64, lambda float64, tableSize uint64, alpha float64) error {
 	return fmt.Errorf("TableBucketer not implemented")
+}
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (b *TableBucketer) MarshalBinary() ([]byte, error) { 
+	return nil, fmt.Errorf("TableBucketer.MarshalBinary not implemented") 
+}
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (b *TableBucketer) UnmarshalBinary(data []byte) error { 
+	return fmt.Errorf("TableBucketer.UnmarshalBinary not implemented") 
 }
 func (b *TableBucketer) Bucket(hash uint64) BucketIDType { return 0 }
 func (b *TableBucketer) NumBuckets() uint64              { return 0 }

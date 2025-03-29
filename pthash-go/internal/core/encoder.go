@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding" // Add this import for BinaryMarshaler/Unmarshaler
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -20,8 +21,8 @@ type Encoder interface {
 	// Name returns the string identifier of the encoder.
 	Name() string
 	// Add marshalling interfaces
-	binary.BinaryMarshaler
-	binary.BinaryUnmarshaler
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
 }
 
 // --- Rice Sequence Implementation ---
@@ -69,16 +70,15 @@ func optimalParameterKiely(values []uint64) uint8 {
 	// Eq. (8) from Kiely, "Selecting the Golomb Parameter in Rice Coding", 2004.
 	// l = floor(log2(log(phi-1)/log(1-p))) + 1
 	// phi = (sqrt(5) + 1) / 2
-	// Use precomputed value for log_e(phi-1)
-	log_e_phi_minus_1 := -0.48121182505960345
+	const logPhiMinus1 = -0.34948500216 // log2(phi - 1) precomputed
 
-	log_e_1_minus_p := math.Log(1.0 - p)
-	if log_e_1_minus_p == 0 { // Avoid division by zero if p is very close to 0
+	log1MinusP := math.Log2(1.0 - p) // Use Log2 directly as in C++ formula
+	if log1MinusP == 0 { // Avoid division by zero if p is very close to 0
 		return 63 // Large parameter if p is tiny
 	}
 
-	val_ln := logPhiMinus1 / log_e_1_minus_p
-	l_float := math.Floor(math.Log2(val_ln)) + 1.0
+	val := logPhiMinus1 / log1MinusP
+	l_float := math.Floor(val) + 1.0
 
 	if l_float < 0 {
 		return 0
@@ -212,6 +212,18 @@ func (rs *RiceSequence) NumBits() uint64 {
 		d1Bits = rs.highBitsD1.NumBits()
 	}
 	return lbBits + hbBits + d1Bits
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (rs *RiceSequence) MarshalBinary() ([]byte, error) {
+	// TODO: Serialize fields optimalParamL, lowBits, highBits, highBitsD1
+	return nil, fmt.Errorf("RiceSequence.MarshalBinary not implemented")
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (rs *RiceSequence) UnmarshalBinary(data []byte) error {
+	// TODO: Deserialize fields
+	return fmt.Errorf("RiceSequence.UnmarshalBinary not implemented")
 }
 
 // --- Rice Encoder Implementation ---
@@ -350,6 +362,21 @@ func (cv *CompactVector) NumBitsStored() uint64 {
 		return 0
 	}
 	return cv.data.NumBitsStored()
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (cv *CompactVector) MarshalBinary() ([]byte, error) {
+	// TODO: Serialize width, size, and data (BitVector)
+	if cv.data == nil {
+		// Handle case where data might be nil (e.g., after build error?)
+		return nil, fmt.Errorf("CompactVector.MarshalBinary: data is nil")
+	}
+	return nil, fmt.Errorf("CompactVector.MarshalBinary not implemented")
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (cv *CompactVector) UnmarshalBinary(data []byte) error {
+	return fmt.Errorf("CompactVector.UnmarshalBinary not implemented")
 }
 
 // --- CompactVectorBuilder ---
@@ -509,6 +536,17 @@ func (d *D1Array) NumBits() uint64 {
 	return 64 // Placeholder for pointer size
 }
 
+// MarshalBinary implements encoding.BinaryMarshaler.
+func (d *D1Array) MarshalBinary() ([]byte, error) {
+	// TODO: Serialize bv and precomputed structures
+	return nil, fmt.Errorf("D1Array.MarshalBinary not implemented")
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+func (d *D1Array) UnmarshalBinary(data []byte) error {
+	return fmt.Errorf("D1Array.UnmarshalBinary not implemented")
+}
+
 // --- Placeholder for other encoders ---
 
 // EliasFano is needed for minimal PHF free slots. Placeholder.
@@ -589,17 +627,3 @@ func (ef *EliasFano) UnmarshalBinary(data []byte) error {
 	return fmt.Errorf("EliasFano.UnmarshalBinary not implemented")
 }
 
-// Helper functions for marshaling/unmarshaling
-func tryMarshal(v interface{}) ([]byte, error) {
-	if marshaler, ok := v.(binary.BinaryMarshaler); ok {
-		return marshaler.MarshalBinary()
-	}
-	return nil, fmt.Errorf("type %T does not implement binary.BinaryMarshaler", v)
-}
-
-func tryUnmarshal(v interface{}, data []byte) error {
-	if unmarshaler, ok := v.(binary.BinaryUnmarshaler); ok {
-		return unmarshaler.UnmarshalBinary(data)
-	}
-	return fmt.Errorf("type %T does not implement binary.BinaryUnmarshaler", v)
-}
