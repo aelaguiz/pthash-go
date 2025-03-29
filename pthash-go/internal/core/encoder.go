@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
@@ -18,6 +19,9 @@ type Encoder interface {
 	Size() uint64
 	// Name returns the string identifier of the encoder.
 	Name() string
+	// Add marshalling interfaces
+	binary.BinaryMarshaler
+	binary.BinaryUnmarshaler
 }
 
 // --- Rice Sequence Implementation ---
@@ -65,8 +69,8 @@ func optimalParameterKiely(values []uint64) uint8 {
 	// Eq. (8) from Kiely, "Selecting the Golomb Parameter in Rice Coding", 2004.
 	// l = floor(log2(log(phi-1)/log(1-p))) + 1
 	// phi = (sqrt(5) + 1) / 2
-	const phi = (math.Sqrt(5.0) + 1.0) / 2.0
-	const logPhiMinus1 = -0.34948500216 // log2(phi - 1) precomputed = log2(1/phi) = -log2(phi)
+	// Use precomputed value for log_e(phi-1)
+	log_e_phi_minus_1 := -0.48121182505960345
 
 	log1MinusP := math.Log2(1.0 - p)
 	if log1MinusP == 0 { // Avoid division by zero if p is very close to 0
@@ -237,6 +241,16 @@ func (e *RiceEncoder) NumBits() uint64 {
 // Size implements the Encoder interface.
 func (e *RiceEncoder) Size() uint64 {
 	return e.values.Size()
+}
+
+// MarshalBinary implements binary.BinaryMarshaler
+func (e *RiceEncoder) MarshalBinary() ([]byte, error) {
+	return tryMarshal(&e.values)
+}
+
+// UnmarshalBinary implements binary.BinaryUnmarshaler
+func (e *RiceEncoder) UnmarshalBinary(data []byte) error {
+	return tryUnmarshal(&e.values, data)
 }
 
 // --- CompactVector Implementation ---
@@ -427,6 +441,18 @@ func (e *CompactEncoder) Size() uint64 {
 	return e.values.Size()
 }
 
+// MarshalBinary implements binary.BinaryMarshaler
+func (e *CompactEncoder) MarshalBinary() ([]byte, error) {
+	return tryMarshal(e.values)
+}
+
+// UnmarshalBinary implements binary.BinaryUnmarshaler
+func (e *CompactEncoder) UnmarshalBinary(data []byte) error {
+	// Need to reconstruct CompactVector first
+	e.values = &CompactVector{} // Create empty one
+	return tryUnmarshal(e.values, data)
+}
+
 // --- Helper for RiceSequence: Rank/Select on BitVector ---
 // This is a simple implementation for rank/select structure.
 // A real implementation needs efficient rank/select, often using precomputed tables.
@@ -489,7 +515,7 @@ func (d *D1Array) NumBits() uint64 {
 type EliasFano struct { /* TODO */ }
 
 // DiffCompactEncoder for dense partitioned offsets. Placeholder.
-type DiffCompactEncoder struct { /* TODO */ }
+type DiffCompactEncoder struct {} // Empty placeholder
 
 // EliasFano stores a monotone sequence compactly. Placeholder.
 type EliasFano struct {
@@ -558,4 +584,19 @@ func (ef *EliasFano) MarshalBinary() ([]byte, error) {
 func (ef *EliasFano) UnmarshalBinary(data []byte) error {
 	// TODO: Deserialize fields
 	return fmt.Errorf("EliasFano.UnmarshalBinary not implemented")
+}
+
+// Helper functions for marshaling/unmarshaling
+func tryMarshal(v interface{}) ([]byte, error) {
+	if marshaler, ok := v.(binary.BinaryMarshaler); ok {
+		return marshaler.MarshalBinary()
+	}
+	return nil, fmt.Errorf("type %T does not implement binary.BinaryMarshaler", v)
+}
+
+func tryUnmarshal(v interface{}, data []byte) error {
+	if unmarshaler, ok := v.(binary.BinaryUnmarshaler); ok {
+		return unmarshaler.UnmarshalBinary(data)
+	}
+	return fmt.Errorf("type %T does not implement binary.BinaryUnmarshaler", v)
 }

@@ -134,16 +134,11 @@ type RangeBucketer struct {
 	// No fastmod M needed based on C++ Bucket method
 }
 
-// Init initializes the RangeBucketer with the given number of buckets.
-func (b *RangeBucketer) Init(numBuckets uint64) error {
-	b.numBuckets = numBuckets
-	// No fastmod M needed based on C++ Bucket method
-	return nil
-}
-
-// Init initializes the RangeBucketer. Note: parameters lambda, tableSize, alpha are ignored.
+// Init initializes the RangeBucketer. Ignores lambda, tableSize, alpha.
 func (b *RangeBucketer) Init(numBuckets uint64, lambda float64, tableSize uint64, alpha float64) error {
-	return b.Init(numBuckets)
+	// This method satisfies the Bucketer interface
+	b.numBuckets = numBuckets
+	return nil
 }
 
 // Bucket calculates partition = ((hash >> 32U) * m_num_buckets) >> 32U;

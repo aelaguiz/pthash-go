@@ -99,7 +99,7 @@ func ComputeM64(d uint64) M64 {
 // Result high 64 bits = Phh + carry_from(middle)
 func mul128_u64(low_hi, low_lo, d uint64) uint64 {
 	phh, phl := bits.Mul64(low_hi, d)
-	plh, pll := bits.Mul64(low_lo, d)
+	plh, _ := bits.Mul64(low_lo, d) // Changed pll to _
 	_, carry := bits.Add64(phl, plh, 0)
 	res, _ := bits.Add64(phh, 0, carry) // Add carry to phh
 	return res
