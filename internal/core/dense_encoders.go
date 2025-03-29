@@ -341,19 +341,24 @@ func (de *DiffEncoder[E]) Encode(values []uint64, increment uint64) error {
 		// Let's allocate based on whether E itself is a pointer.
 		var newInstance reflect.Value
 		if typeE.Kind() == reflect.Ptr {
-			// E is a pointer type (*MyStruct). We need to create a MyStruct and store *MyStruct.
-			elemType := typeE.Elem()          // Get MyStruct type
-			newInstance = reflect.New(elemType) // Creates *MyStruct (as reflect.Value)
+			// E is a pointer type (e.g., *MyStruct). Need to create the underlying type (MyStruct).
+			elemType := typeE.Elem()
+			newInstance := reflect.New(elemType) // Creates *MyStruct (as reflect.Value of type *MyStruct)
+			// de.encoderPtr needs to be **MyStruct.
+			// We need a pointer to the pointer created above.
+			// Create a variable to hold the pointer, then take its address.
+			ptrVal := newInstance.Interface().(E) // ptrVal is type E (*MyStruct)
+			de.encoderPtr = &ptrVal               // Assign the address of ptrVal to de.encoderPtr (**MyStruct)
 		} else {
-			// E is a value type (MyStruct). We need a pointer to it.
-			newInstance = reflect.New(typeE) // Creates *MyStruct (as reflect.Value)
+			// E is a value type (e.g., MyStruct). Need to create a pointer to it.
+			newInstance = reflect.New(typeE) // Creates *MyStruct (as reflect.Value of type *MyStruct)
+			// de.encoderPtr needs to be *MyStruct.
+			// newInstance already holds the *MyStruct we need.
+			// Assert the interface value to the correct pointer type (*E = *MyStruct).
+			de.encoderPtr = newInstance.Interface().(*E)
 		}
-
-		// Assign the created pointer (type *E) to de.encoderPtr
-		// The type assertion ensures we assign the correct pointer type *E.
-		de.encoderPtr = newInstance.Interface().(*E)
 	}
-	// Now de.encoderPtr is guaranteed to be non-nil and point to a valid E zero value.
+	// Now de.encoderPtr is guaranteed to be non-nil and point to a valid E instance (or a pointer to it).
 
 	// Proceed with encoding, calling methods on the pointed-to instance
 	if n == 0 {
@@ -366,8 +371,13 @@ func (de *DiffEncoder[E]) Encode(values []uint64, increment uint64) error {
 	for i, val := range values {
 		toEncode := int64(val) - expected
 		absToEncode := uint64(toEncode)
-		if toEncode < 0 { absToEncode = uint64(-toEncode) }
-		signBit := uint64(1); if toEncode < 0 { signBit = 0 }
+		if toEncode < 0 {
+			absToEncode = uint64(-toEncode)
+		}
+		signBit := uint64(1)
+		if toEncode < 0 {
+			signBit = 0
+		}
 		diffValues[i] = (absToEncode << 1) | signBit
 		expected += int64(increment)
 	}
@@ -386,19 +396,24 @@ func (de *DiffEncoder[E]) Access(i uint64) uint64 {
 	expected := int64(i * de.Increment)
 	absDiff := encodedDiff >> 1
 	signBit := encodedDiff & 1
-	diff := int64(absDiff); if signBit == 0 { diff = -diff }
+	diff := int64(absDiff)
+	if signBit == 0 {
+		diff = -diff
+	}
 	result := expected + diff
 	return uint64(result)
 }
 
 func (de *DiffEncoder[E]) Size() uint64 {
-	if de.encoderPtr == nil { return 0 }
+	if de.encoderPtr == nil {
+		return 0
+	}
 	// Call Size on the instance pointed to by encoderPtr
 	return (*de.encoderPtr).Size()
 }
 
 func (de *DiffEncoder[E]) NumBits() uint64 {
-	bits := uint64(8*8) // Increment size in bits
+	bits := uint64(8 * 8) // Increment size in bits
 	if de.encoderPtr != nil {
 		// Call NumBits on the instance pointed to by encoderPtr
 		bits += (*de.encoderPtr).NumBits()
@@ -468,12 +483,15 @@ func (de *DiffEncoder[E]) UnmarshalBinary(data []byte) error {
 		var newInstance reflect.Value
 		if typeE.Kind() == reflect.Ptr {
 			elemType := typeE.Elem()
-			newInstance = reflect.New(elemType) // Allocates *elemType
+			newInstance := reflect.New(elemType) // Allocates *elemType (e.g. *MyStruct)
+			// Assign the address of the allocated pointer (*elemType) to de.encoderPtr (**MyStruct).
+			ptrVal := newInstance.Interface().(E) // ptrVal is type E (*MyStruct)
+			de.encoderPtr = &ptrVal               // Assign &ptrVal (**MyStruct) to de.encoderPtr (**MyStruct)
 		} else {
-			newInstance = reflect.New(typeE) // Allocates *valueType
+			newInstance = reflect.New(typeE) // Allocates *valueType (e.g. *MyStruct)
+			// Assign the allocated pointer (*valueType) to de.encoderPtr (*MyStruct).
+			de.encoderPtr = newInstance.Interface().(*E)
 		}
-		// Assign the allocated pointer (*E) to de.encoderPtr
-		de.encoderPtr = newInstance.Interface().(*E)
 
 		// Unmarshal into the object pointed to by de.encoderPtr
 		err := serial.TryUnmarshal(de.encoderPtr, encoderData)
