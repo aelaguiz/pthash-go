@@ -72,13 +72,13 @@ func optimalParameterKiely(values []uint64) uint8 {
 	// Use precomputed value for log_e(phi-1)
 	log_e_phi_minus_1 := -0.48121182505960345
 
-	log1MinusP := math.Log2(1.0 - p)
-	if log1MinusP == 0 { // Avoid division by zero if p is very close to 0
+	log_e_1_minus_p := math.Log(1.0 - p)
+	if log_e_1_minus_p == 0 { // Avoid division by zero if p is very close to 0
 		return 63 // Large parameter if p is tiny
 	}
 
-	val := logPhiMinus1 / log1MinusP
-	l_float := math.Floor(val) + 1.0
+	val_ln := logPhiMinus1 / log_e_1_minus_p
+	l_float := math.Floor(math.Log2(val_ln)) + 1.0
 
 	if l_float < 0 {
 		return 0
