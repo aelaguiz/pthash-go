@@ -2,12 +2,14 @@ package builder
 
 import (
 	"fmt"
+	"log"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Search orchestrates the pilot search based on config.
@@ -74,14 +76,14 @@ func searchSequentialXOR(
 
 	processedBuckets := uint64(0)
 	searchStartTime := time.Now()
-	log.Printf("Starting searchSequentialXOR: numKeys=%d, numBuckets=%d, tableSize=%d", 
+	log.Printf("Starting searchSequentialXOR: numKeys=%d, numBuckets=%d, tableSize=%d",
 		numKeys, numBuckets, tableSize)
-		
+
 	for bucketsIt.HasNext() {
 		bucketStartTime := time.Now()
-		log.Printf("Processing bucket %d of %d (%v elapsed since search start)", 
+		log.Printf("Processing bucket %d of %d (%v elapsed since search start)",
 			processedBuckets+1, numNonEmptyBuckets, time.Since(searchStartTime))
-			
+
 		bucket := bucketsIt.Next()
 		bucketSize := bucket.Size()
 		if bucketSize == 0 {
@@ -97,11 +99,11 @@ func searchSequentialXOR(
 		for pilot := uint64(0); ; pilot++ {
 			// Log progress every 100,000 iterations
 			if pilot > 0 && pilot%100000 == 0 {
-				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v", 
+				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v",
 					bucketID, bucketSize, pilot, time.Since(pilotSearchStartTime))
 				log.Printf("Payloads: %v", payloads)
 			}
-			
+
 			hashedPilot := uint64(0)
 			if pilot < searchCacheSize {
 				hashedPilot = hashedPilotsCache[pilot]
@@ -120,15 +122,15 @@ func searchSequentialXOR(
 			for i, pld := range payloads {
 				hash := pld // In single PHF, payload is hash.Second()
 				p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
-				
+
 				// Log detailed collision info occasionally
 				if pilot > 0 && pilot%1000000 == 0 {
-					log.Printf("  Payload[%d]=%d, XOR=%d, Position=%d, Taken=%v", 
+					log.Printf("  Payload[%d]=%d, XOR=%d, Position=%d, Taken=%v",
 						i, pld, hash^hashedPilot, p, taken.Get(p))
 				}
 
 				// Check collision with already taken slots
-				if taken.Get(p) { 
+				if taken.Get(p) {
 					if pilot > 0 && pilot%1000000 == 0 {
 						log.Printf("  Collision at position %d for payload %d", p, pld)
 					}
@@ -160,9 +162,9 @@ func searchSequentialXOR(
 
 			// Pilot found!
 			pilots.EmplaceBack(bucketID, pilot)
-			log.Printf("Found pilot %d for bucket %d after %v", 
+			log.Printf("Found pilot %d for bucket %d after %v",
 				pilot, bucketID, time.Since(bucketStartTime))
-				
+
 			for _, p := range positions {
 				taken.Set(p) // Mark slots as taken
 			}
@@ -393,5 +395,3 @@ func searchParallelXOR(
 
 	return nil
 }
-
-
