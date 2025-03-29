@@ -96,7 +96,12 @@ func searchSequentialXOR(
 
 		foundPilot := false
 		pilotSearchStartTime := time.Now()
+		const maxPilotAttempts = 50_000_000 // TEMPORARY DEBUG LIMIT
 		for pilot := uint64(0); ; pilot++ {
+			// Safety check to prevent infinite loops during debugging
+			if pilot >= maxPilotAttempts {
+				return fmt.Errorf("DEBUG: Exceeded max pilot attempts (%d) for bucket %d", maxPilotAttempts, bucketID)
+			}
 			// Log progress every 100,000 iterations
 			if pilot > 0 && pilot%100000 == 0 {
 				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v",
