@@ -2,8 +2,10 @@ package builder
 
 import (
 	"fmt"
+	"log"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
