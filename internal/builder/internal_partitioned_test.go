@@ -49,7 +49,7 @@ func runPartitionBuild(t *testing.T, config core.BuildConfig, keys []uint64) (*I
 	if builder.numPartitions == 0 {
 		builder.numPartitions = 1
 	}
-	
+
 	// The only truly invalid case is if no partitions would be created after adjustments
 	if numKeys > 0 && builder.numPartitions == 0 {
 		return builder, nil, fmt.Errorf("test setup error: calculated numPartitions is 0 for numKeys %d, avgPartitionSize %d", numKeys, avgPartitionSize)
@@ -294,7 +294,7 @@ func TestPartitioningOffsetCalculation(t *testing.T) {
 			}
 
 			// Get actual partition sizes
-			actualPartSizes := make([]uint64, numPartitions)
+			actualPartSizes := make([]uint64, builder.NumPartitions())
 			for i := range buffers {
 				actualPartSizes[i] = uint64(len(buffers[i]))
 			}
