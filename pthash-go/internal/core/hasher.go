@@ -163,6 +163,17 @@ func DefaultHash64(val uint64, seed uint64) uint64 {
 	return murmurHash64A(buf[:], seed)
 }
 
+// Mix64 implements a 64-bit mixing function.
+// Matches C++ implementation from hash64::mix()
+func Mix64(h uint64) uint64 {
+    h ^= h >> 30
+    h *= 0xbf58476d1ce4e5b9
+    h ^= h >> 27
+    h *= 0x94d049bb133111eb
+    h ^= h >> 31
+    return h
+}
+
 // CheckHashCollisionProbability performs the check from C++.
 func CheckHashCollisionProbability[H Hasher[any]](numKeys uint64) error {
 	// This check relies on knowing the hash output size.

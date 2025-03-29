@@ -490,3 +490,72 @@ type EliasFano struct { /* TODO */ }
 
 // DiffCompactEncoder for dense partitioned offsets. Placeholder.
 type DiffCompactEncoder struct { /* TODO */ }
+
+// EliasFano stores a monotone sequence compactly. Placeholder.
+type EliasFano struct {
+	// Internal data structures for lower/upper bits, rank/select
+	numValues uint64
+	// Placeholder fields
+	lowerBits *BitVector
+	upperBits *BitVector
+	upperBitsSelect *D1Array // For select0 on upper bits
+}
+
+// NewEliasFano creates an empty EliasFano encoder.
+func NewEliasFano() *EliasFano {
+	// Initialize? Or wait for Encode.
+	return &EliasFano{}
+}
+
+// Encode builds the Elias-Fano structure from a sorted slice.
+func (ef *EliasFano) Encode(sortedValues []uint64) error {
+	// TODO: Implement actual Elias-Fano encoding algorithm.
+	// 1. Determine parameters (l, number of upper bits).
+	// 2. Build lower bits bitvector.
+	// 3. Build upper bits bitvector (unary code of high parts).
+	// 4. Build rank/select structures (e.g., D1Array for select0).
+	ef.numValues = uint64(len(sortedValues))
+	return fmt.Errorf("EliasFano.Encode not implemented")
+}
+
+// Access retrieves the value with rank `i` (0-based).
+func (ef *EliasFano) Access(rank uint64) uint64 {
+	if rank >= ef.numValues {
+		panic("EliasFano.Access: rank out of bounds")
+	}
+	// TODO: Implement Elias-Fano access algorithm.
+	// 1. Use select0 on upperBits to find position range.
+	// 2. Calculate high part from rank and position.
+	// 3. Read low part from lowerBits at 'rank'.
+	// 4. Combine high and low parts.
+	// fmt.Println("Warning: EliasFano.Access returning placeholder 0")
+	return 0 // Placeholder
+}
+
+// Size returns the number of values encoded.
+func (ef *EliasFano) Size() uint64 {
+	return ef.numValues
+}
+
+// NumBits returns the storage size. Placeholder.
+func (ef *EliasFano) NumBits() uint64 {
+	lbBits := uint64(0)
+	ubBits := uint64(0)
+	selBits := uint64(0)
+	if ef.lowerBits != nil { lbBits = ef.lowerBits.NumBitsStored() }
+	if ef.upperBits != nil { ubBits = ef.upperBits.NumBitsStored() }
+	if ef.upperBitsSelect != nil { selBits = ef.upperBitsSelect.NumBits() }
+	return lbBits + ubBits + selBits + 8*8 // + size field
+}
+
+// MarshalBinary placeholder
+func (ef *EliasFano) MarshalBinary() ([]byte, error) {
+	// TODO: Serialize ef.numValues, ef.lowerBits, ef.upperBits, ef.upperBitsSelect
+	return nil, fmt.Errorf("EliasFano.MarshalBinary not implemented")
+}
+
+// UnmarshalBinary placeholder
+func (ef *EliasFano) UnmarshalBinary(data []byte) error {
+	// TODO: Deserialize fields
+	return fmt.Errorf("EliasFano.UnmarshalBinary not implemented")
+}
