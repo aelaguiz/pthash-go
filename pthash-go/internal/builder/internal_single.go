@@ -91,7 +91,7 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) BuildFromKeys(keys []K, config
 				return core.BuildTimings{}, err // Return non-seed related errors immediately
 			}
 		}
-		return core.BuildTimings{}, core.SeedRuntimeError{"all seeds failed after 10 attempts"}
+		return core.BuildTimings{}, core.SeedRuntimeError{Msg: "all seeds failed after 10 attempts"}
 	}
 	// Build with the specified seed
 	return b.buildFromKeysInternal(keys, config)
