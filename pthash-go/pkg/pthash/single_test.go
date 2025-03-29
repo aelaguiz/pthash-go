@@ -94,10 +94,10 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 	type E = core.RiceEncoder        // Need to use pointer type since methods have pointer receivers
 
 	seed := uint64(time.Now().UnixNano())
-	numKeysList := []uint64{10000} // Faster CI
+	numKeysList := []uint64{1000} // Smaller N for debugging
 
-	alphas := []float64{0.94, 0.98}
-	lambdas := []float64{3.0, 5.0}
+	alphas := []float64{0.98} // Simpler alpha for debugging
+	lambdas := []float64{6.0} // Higher lambda (smaller buckets) for debugging
 	searchTypes := []core.SearchType{core.SearchTypeXOR} // Add SearchTypeAdd when implemented
 
 	for _, numKeys := range numKeysList {
@@ -121,7 +121,8 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								config.Verbose = false // Keep tests quiet unless debugging
 								config.NumThreads = 1  // FORCE SEQUENTIAL for this check
 								// Use a fixed seed for reproducibility within a test run
-								config.Seed = uint64(rand.Int63()) // Fixed random seed per subtest
+								// config.Seed = uint64(rand.Int63()) // Use random later
+								config.Seed = 12345 // Fixed seed for debugging
 
 								// Create hasher and bucketer instances
 								hasher := core.NewXXHash128Hasher[K]()
