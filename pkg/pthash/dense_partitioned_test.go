@@ -25,7 +25,7 @@ func TestInternalDensePartitionedPHFBuildAndCheck(t *testing.T) {
 
 	seed := uint64(time.Now().UnixNano())
 	numKeysList := []uint64{5000, 10000} // Smaller N for faster dense test
-	avgPartSizes := []uint64{1000, 2500}  // Test partitioning
+	avgPartSizes := []uint64{1000, 2500} // Test partitioning
 
 	alphas := []float64{0.94, 0.98}
 	lambdas := []float64{4.0, 6.0}
@@ -42,9 +42,15 @@ func TestInternalDensePartitionedPHFBuildAndCheck(t *testing.T) {
 
 		for _, avgPartSize := range avgPartSizes {
 			// Ensure partition size constraints for dense mode
-			if avgPartSize < core.MinPartitionSize { continue }
-			if avgPartSize > core.MaxPartitionSize { continue }
-			if avgPartSize >= numKeys { continue }
+			if avgPartSize < core.MinPartitionSize {
+				continue
+			}
+			if avgPartSize > core.MaxPartitionSize {
+				continue
+			}
+			if avgPartSize >= numKeys {
+				continue
+			}
 
 			t.Run(fmt.Sprintf("N=%d_P=%d", numKeys, avgPartSize), func(t *testing.T) {
 
@@ -81,13 +87,13 @@ func TestInternalDensePartitionedPHFBuildAndCheck(t *testing.T) {
 								finalPHF := pthash.NewDensePartitionedPHF[K, H, B, E](minimal, searchType)
 								encodeTime, err := finalPHF.Build(pb, &config) // Pass builder to final build
 								if err != nil {
-								    // Check if it's an unimplemented encoder error (expected if stubs used)
-								    if err.Error() == "CompactVector.MarshalBinary not implemented" ||
-								       err.Error() == "CompactEncoder.Encode: CompactVector not implemented" || // Assuming stub error
-                                       err.Error() == "EliasFano.Encode not implemented" { // Assuming stub error
-								        t.Logf("Skipping check due to unimplemented dependency: %v", err)
-								        t.SkipNow()
-								    }
+									// Check if it's an unimplemented encoder error (expected if stubs used)
+									if err.Error() == "CompactVector.MarshalBinary not implemented" ||
+										err.Error() == "CompactEncoder.Encode: CompactVector not implemented" || // Assuming stub error
+										err.Error() == "EliasFano.Encode not implemented" { // Assuming stub error
+										t.Logf("Skipping check due to unimplemented dependency: %v", err)
+										t.SkipNow()
+									}
 									t.Fatalf("finalPHF.Build failed: %v", err)
 								}
 								t.Logf("Build Timings: Part: %v, MapOrd: %v, Search: %v, Encode: %v",
@@ -100,12 +106,12 @@ func TestInternalDensePartitionedPHFBuildAndCheck(t *testing.T) {
 								// Requires working EliasFano and CompactVector for minimal mapping and offsets
 								// Skip check if dependencies are stubbed
 								if finalPHF.FreeSlotsNotImplemented() { // Add helper if needed
-								     t.Log("Skipping check: Minimal PHF requires EliasFano implementation.")
-								     t.SkipNow()
+									t.Log("Skipping check: Minimal PHF requires EliasFano implementation.")
+									t.SkipNow()
 								}
 								if finalPHF.OffsetsNotImplemented() { // Add helper if needed
-								     t.Log("Skipping check: Dense PHF requires CompactVector for offsets.")
-								     t.SkipNow()
+									t.Log("Skipping check: Dense PHF requires CompactVector for offsets.")
+									t.SkipNow()
 								}
 
 								err = check[K](keys, finalPHF) // Use the same check function

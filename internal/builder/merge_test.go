@@ -56,9 +56,17 @@ func TestMergeSingleBlock(t *testing.T) {
 // TestMergeSingleBlockDuplicatePayload remains the same, checking the error
 
 func TestMergeMultipleBlocks(t *testing.T) {
-	block1 := pairsT{{1, 101}, {3, 301}, {5, 501}, {5, 503}}
-	block2 := pairsT{{1, 102}, {2, 201}, {5, 502}, {6, 601}}
-	block3 := pairsT{{3, 302}, {5, 500}} // Ensure sorting handles 500 < 501
+	block1 := pairsT{
+		{BucketID: 1, Payload: 101}, {BucketID: 3, Payload: 301},
+		{BucketID: 5, Payload: 501}, {BucketID: 5, Payload: 503},
+	}
+	block2 := pairsT{
+		{BucketID: 1, Payload: 102}, {BucketID: 2, Payload: 201},
+		{BucketID: 5, Payload: 502}, {BucketID: 6, Payload: 601},
+	}
+	block3 := pairsT{
+		{BucketID: 3, Payload: 302}, {BucketID: 5, Payload: 500},
+	}
 	// Sort blocks to ensure preconditions (ASC ID, ASC Payload)
 	sort.Slice(block1, func(i, j int) bool { return block1[i].Less(block1[j]) })
 	sort.Slice(block2, func(i, j int) bool { return block2[i].Less(block2[j]) })

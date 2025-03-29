@@ -15,19 +15,19 @@ import (
 // B: Bucketer type implementing core.Bucketer (e.g., TableBucketer[OptBucketer])
 // E: DenseEncoder type implementing core.DenseEncoder (e.g., InterCInterR)
 type DensePartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.DenseEncoder] struct {
-	seed                  uint64
-	numKeys               uint64
-	tableSize             uint64              // Total size estimate (sum of sub-table sizes)
-	partitioner           *core.RangeBucketer // Maps key hash -> partition
-	subBucketer           B                   // Maps hash -> sub-bucket WITHIN a partition
-	pilots                E                   // Stores pilots (interleaved or mono)
-	offsets               *core.DiffEncoder[*core.CompactEncoder] // Stores partition start offsets (diff encoded)
-	freeSlots             *core.EliasFano     // For minimal mapping
-	hasher                H
-	isMinimal             bool
-	searchType            core.SearchType
-	numPartitions         uint64            // Store for convenience
-	numBucketsPerPartition uint64           // Store for convenience
+	seed                   uint64
+	numKeys                uint64
+	tableSize              uint64                                  // Total size estimate (sum of sub-table sizes)
+	partitioner            *core.RangeBucketer                     // Maps key hash -> partition
+	subBucketer            B                                       // Maps hash -> sub-bucket WITHIN a partition
+	pilots                 E                                       // Stores pilots (interleaved or mono)
+	offsets                *core.DiffEncoder[*core.CompactEncoder] // Stores partition start offsets (diff encoded)
+	freeSlots              *core.EliasFano                         // For minimal mapping
+	hasher                 H
+	isMinimal              bool
+	searchType             core.SearchType
+	numPartitions          uint64 // Store for convenience
+	numBucketsPerPartition uint64 // Store for convenience
 }
 
 // NewDensePartitionedPHF creates an empty DensePartitionedPHF instance.
@@ -63,9 +63,11 @@ func (f *DensePartitionedPHF[K, H, B, E]) Build(
 	if f.isMinimal != config.Minimal || f.searchType != config.Search {
 		return 0, fmt.Errorf("DensePartitionedPHF type parameters mismatch build config")
 	}
-	if pb == nil { return 0, fmt.Errorf("builder cannot be nil") }
+	if pb == nil {
+		return 0, fmt.Errorf("builder cannot be nil")
+	}
 	if len(pb.Builders()) != int(pb.NumPartitions()) {
-	    return 0, fmt.Errorf("builder state inconsistent: %d sub-builders for %d partitions", len(pb.Builders()), pb.NumPartitions())
+		return 0, fmt.Errorf("builder state inconsistent: %d sub-builders for %d partitions", len(pb.Builders()), pb.NumPartitions())
 	}
 
 	// --- Copy final state ---
@@ -78,13 +80,14 @@ func (f *DensePartitionedPHF[K, H, B, E]) Build(
 	f.numBucketsPerPartition = pb.NumBucketsPerPartition()
 	// Initialize sub-bucketer using parameters from the first sub-builder (assume consistent)
 	if len(pb.Builders()) > 0 && pb.Builders()[0] != nil {
-	    f.subBucketer = pb.Builders()[0].Bucketer() // Copy initialized sub-bucketer
+		f.subBucketer = pb.Builders()[0].Bucketer() // Copy initialized sub-bucketer
 	} else if f.numPartitions > 0 {
-	    // If all partitions were empty, initialize manually
-	     err := f.subBucketer.Init(f.numBucketsPerPartition, config.Lambda, 0, config.Alpha) // Table size approx 0?
-	     if err != nil { return 0, fmt.Errorf("failed to init sub-bucketer for empty partitions: %w", err)}
+		// If all partitions were empty, initialize manually
+		err := f.subBucketer.Init(f.numBucketsPerPartition, config.Lambda, 0, config.Alpha) // Table size approx 0?
+		if err != nil {
+			return 0, fmt.Errorf("failed to init sub-bucketer for empty partitions: %w", err)
+		}
 	}
-
 
 	// --- Encode Offsets ---
 	rawOffsets := pb.RawPartitionOffsets() // Get offsets before diff encoding
@@ -110,7 +113,6 @@ func (f *DensePartitionedPHF[K, H, B, E]) Build(
 		return 0, fmt.Errorf("failed to encode pilots densely: %w", err)
 	}
 
-
 	// --- Encode Free Slots ---
 	if f.isMinimal && f.numKeys < f.tableSize {
 		freeSlotsData := pb.FreeSlots()
@@ -130,7 +132,6 @@ func (f *DensePartitionedPHF[K, H, B, E]) Build(
 	util.Log(config.Verbose, "DensePartitionedPHF final build stage took: %v", elapsed)
 	return elapsed, nil
 }
-
 
 // Lookup evaluates the hash function.
 func (f *DensePartitionedPHF[K, H, B, E]) Lookup(key K) uint64 {
@@ -194,26 +195,24 @@ func (f *DensePartitionedPHF[K, H, B, E]) Lookup(key K) uint64 {
 	return p
 }
 
-
 // --- Accessors ---
 func (f *DensePartitionedPHF[K, H, B, E]) NumKeys() uint64   { return f.numKeys }
 func (f *DensePartitionedPHF[K, H, B, E]) TableSize() uint64 { return f.tableSize } // Estimated total
 func (f *DensePartitionedPHF[K, H, B, E]) Seed() uint64      { return f.seed }
 func (f *DensePartitionedPHF[K, H, B, E]) IsMinimal() bool   { return f.isMinimal }
 
-
 // --- Space Calculation ---
 func (f *DensePartitionedPHF[K, H, B, E]) NumBits() uint64 {
-	 totalBits := uint64(8 * (8 + 8 + 8)) // seed, numKeys, tableSize
-	 totalBits += f.partitioner.NumBits()
-	 totalBits += f.subBucketer.NumBits()
-	 totalBits += f.pilots.NumBits()
-	 totalBits += f.offsets.NumBits()
-	 if f.freeSlots != nil {
-	     totalBits += f.freeSlots.NumBits()
-	 }
-	 totalBits += 8*8 + 8*8 // numPartitions, numBucketsPerPartition
-	 return totalBits
+	totalBits := uint64(8 * (8 + 8 + 8)) // seed, numKeys, tableSize
+	totalBits += f.partitioner.NumBits()
+	totalBits += f.subBucketer.NumBits()
+	totalBits += f.pilots.NumBits()
+	totalBits += f.offsets.NumBits()
+	if f.freeSlots != nil {
+		totalBits += f.freeSlots.NumBits()
+	}
+	totalBits += 8*8 + 8*8 // numPartitions, numBucketsPerPartition
+	return totalBits
 }
 
 // Helper methods for test skipping

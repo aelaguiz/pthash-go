@@ -21,9 +21,9 @@ import (
 type PartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct {
 	seed        uint64
 	numKeys     uint64
-	tableSize   uint64                   // Total size estimate across partitions
-	partitioner *core.RangeBucketer      // Used to map key hash to partition
-	partitions  []partition[K, H, B, E]  // Slice of sub-PHFs
+	tableSize   uint64                  // Total size estimate across partitions
+	partitioner *core.RangeBucketer     // Used to map key hash to partition
+	partitions  []partition[K, H, B, E] // Slice of sub-PHFs
 	hasher      H                       // Store hasher instance
 	isMinimal   bool
 	searchType  core.SearchType
@@ -74,7 +74,7 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 	f.numKeys = pb.NumKeys()
 	f.tableSize = pb.TableSize()
 	f.partitioner = pb.Partitioner() // This now assigns a pointer to a pointer
-	f.hasher = pb.Hasher() // Get hasher instance from builder
+	f.hasher = pb.Hasher()           // Get hasher instance from builder
 	numPartitions := pb.NumPartitions()
 	f.partitions = make([]partition[K, H, B, E], numPartitions)
 	subBuilders := pb.Builders()

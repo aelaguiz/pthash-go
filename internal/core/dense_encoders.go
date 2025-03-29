@@ -123,18 +123,27 @@ type DenseInterleaved[E Encoder] struct {
 }
 
 func (di *DenseInterleaved[E]) Name() string { var zeroE E; return "inter-" + zeroE.Name() }
+
 func (di *DenseInterleaved[E]) Size() uint64 {
-	if len(di.Encoders) == 0 {
+	// Total size is sum of sizes? Or just total elements? Let's use total elements.
+	if len(di.Encoders) == 0 || di.Encoders[0] == nil { // Add nil check for first element
 		return 0
 	}
-	return di.Encoders[0].Size() * uint64(len(di.Encoders)) // Assumes consistent size
+	// return di.Encoders[0].Size() * uint64(len(di.Encoders)) // Assumes all sub-encoders have same Size (NumPartitions)
+	// CHANGE: Dereference the pointer before calling Size()
+	return (*di.Encoders[0]).Size() * uint64(len(di.Encoders))
 }
+
+// CHANGE THIS METHOD (NumBits):
 func (di *DenseInterleaved[E]) NumBits() uint64 {
 	bits := uint64(0)
-	for _, enc := range di.Encoders {
-		bits += enc.NumBits()
+	for _, encPtr := range di.Encoders { // Renamed loop variable for clarity
+		if encPtr != nil { // Add nil check for safety
+			// bits += enc.NumBits()
+			bits += (*encPtr).NumBits() // CHANGE: Dereference pointer before calling NumBits
+		}
 	}
-	return bits
+	return bits // Add slice overhead? Minimal compared to data.
 }
 func (di *DenseInterleaved[E]) Encode(pilots []uint64) error {
 	return fmt.Errorf("DenseInterleaved.Encode not implemented; use EncodeDense")

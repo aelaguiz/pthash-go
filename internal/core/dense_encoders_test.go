@@ -58,7 +58,8 @@ func TestDenseInterleavedAccess(t *testing.T) {
 	numBuckets := uint64(5)
 
 	var denseEnc DenseInterleaved[*MockEncoder]
-	denseEnc.Encoders = make([]*MockEncoder, numBuckets) // Use pointers
+	// E is *MockEncoder, so []*E is []**MockEncoder
+	denseEnc.Encoders = make([]**MockEncoder, numBuckets)
 
 	// Create and encode data for each bucket's encoder separately
 	for b := uint64(0); b < numBuckets; b++ {
@@ -67,11 +68,14 @@ func TestDenseInterleavedAccess(t *testing.T) {
 			// Assign unique value (same formula as Mono for comparison)
 			bucketPilots[p] = 1000*b + p
 		}
-		denseEnc.Encoders[b] = &MockEncoder{} // Initialize with pointer
-		err := denseEnc.Encoders[b].Encode(bucketPilots)
+		// encoderPtr is *MockEncoder
+		var encoderPtr *MockEncoder = &MockEncoder{}
+		err := encoderPtr.Encode(bucketPilots)
 		if err != nil {
 			t.Fatalf("MockEncoder Encode for bucket %d failed: %v", b, err)
 		}
+		// Assign the address of the pointer to the slice element (**MockEncoder)
+		denseEnc.Encoders[b] = &encoderPtr
 	}
 
 	// Verify AccessDense maps correctly to the right encoder and index within it

@@ -158,7 +158,7 @@ func TestSearchSequentialAdd(t *testing.T) {
 	bucketData := []uint64{uint64(bucketID)}
 	bucketData = append(bucketData, payloads...)
 	mockBuffers := [core.MaxBucketSize][]uint64{}
-	mockBuffers[numKeys-1] = bucketData // Place in buffer corresponding to size
+	mockBuffers[numKeys-1] = bucketData                   // Place in buffer corresponding to size
 	mockIter := newBucketsIterator(mockBuffers[:numKeys]) // Slice up to the max size needed
 
 	// Prepare taken bits and pilot buffer
@@ -242,7 +242,7 @@ func TestSearchSequentialAdd_SecondTest(t *testing.T) {
 	bucketData := []uint64{uint64(bucketID)}
 	bucketData = append(bucketData, payloads...)
 	mockBuffers := [core.MaxBucketSize][]uint64{}
-	mockBuffers[numKeys-1] = bucketData // Place in buffer corresponding to size
+	mockBuffers[numKeys-1] = bucketData                   // Place in buffer corresponding to size
 	mockIter := newBucketsIterator(mockBuffers[:numKeys]) // Slice up to the max size needed
 
 	// Prepare taken bits and pilot buffer
