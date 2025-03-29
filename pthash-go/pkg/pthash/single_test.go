@@ -89,7 +89,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 	type K = uint64
 	type H = core.XXHash128Hasher[K] // Hasher type (value)
 	type B = core.SkewBucketer      // Bucketer type (value)
-	type E = core.RiceEncoder
+	type E = core.RiceEncoder // Need to use pointer type since methods have pointer receivers
 
 	seed := uint64(time.Now().UnixNano())
 	numKeysList := []uint64{10000} // Faster CI
@@ -139,7 +139,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								}
 
 								// Build the actual PHF structure from the builder
-								phf := pthash.NewSinglePHF[K, H, *B, E](minimal, searchType) // Pass pointer type *B to generic
+								phf := pthash.NewSinglePHF[K, H, *B, *E](minimal, searchType) // Pass pointer types *B and *E
 								encodeTime, err := phf.Build(builder, &config)
 								if err != nil {
 									t.Fatalf("phf.Build failed: %v", err)
