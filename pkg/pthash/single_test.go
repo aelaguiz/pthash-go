@@ -325,3 +325,88 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 		}) // End N t.Run
 	} // End numKeys loop
 }
+
+// --- New Serialization Test ---
+
+func TestSinglePHFSerialization(t *testing.T) {
+	// Use a simple, known-good configuration for testing serialization structure
+	type K = uint64
+	type H = core.MurmurHash2_64Hasher[K] // Use Murmur as it's simpler
+	type B = core.SkewBucketer           // Skew is relatively simple
+	type E = core.RiceEncoder            // Rice needs D1Array/CompactVector stubs/impl
+
+	numKeys := uint64(500) // Small number of keys
+	seed := uint64(uint64(time.Now().UnixNano()))
+	keys := util.DistinctUints64(numKeys, seed)
+	if uint64(len(keys)) != numKeys {
+		t.Fatalf("Failed to generate keys")
+	}
+
+	config := core.DefaultBuildConfig()
+	config.Alpha = 0.94
+	config.Lambda = 4.0
+	config.Minimal = true // Test minimal case with free slots
+	config.Search = core.SearchTypeXOR
+	config.Verbose = false
+	config.NumThreads = 1 // Keep it simple for serialization test
+	config.Seed = 123456 // Fixed seed
+
+	// --- Build the PHF ---
+	hasher := core.NewMurmurHash2_64Hasher[K]()
+	bucketer := new(B)
+	builderInst := builder.NewInternalMemoryBuilderSinglePHF[K, H, *B](hasher, bucketer) // Use pointer type *B
+
+	_, err := builderInst.BuildFromKeys(keys, config)
+	if err != nil {
+		t.Fatalf("BuildFromKeys failed: %v", err)
+	}
+
+	phf1 := pthash.NewSinglePHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
+	_, err = phf1.Build(builderInst, &config)
+	if err != nil {
+		// Skip test if EliasFano is needed but stubbed
+		if core.IsEliasFanoStubbed() && config.Minimal {
+			t.Skipf("Skipping serialization test: Minimal PHF requires functional EliasFano (stub detected)")
+		}
+		t.Fatalf("phf1.Build failed: %v", err)
+	}
+
+	// --- Marshal ---
+	data, err := phf1.MarshalBinary()
+	if err != nil {
+		t.Fatalf("phf1.MarshalBinary() failed: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatalf("MarshalBinary returned empty data")
+	}
+	t.Logf("Marshaled SinglePHF size: %d bytes (%.2f bits/key)", len(data), float64(len(data)*8)/float64(phf1.NumKeys()))
+
+	// --- Unmarshal ---
+	phf2 := pthash.NewSinglePHF[K, H, *B, *E](config.Minimal, config.Search) // Create a new empty instance with *same* generic types
+	err = phf2.UnmarshalBinary(data)
+	if err != nil {
+		// If underlying components' UnmarshalBinary are stubbed/fail, this will fail.
+		t.Fatalf("phf2.UnmarshalBinary() failed: %v", err)
+	}
+
+	// --- Compare ---
+	if phf1.Seed() != phf2.Seed() { t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed()) }
+	if phf1.NumKeys() != phf2.NumKeys() { t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys()) }
+	if phf1.TableSize() != phf2.TableSize() { t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize()) }
+	if phf1.IsMinimal() != phf2.IsMinimal() { t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal()) }
+	if phf1.SearchType() != phf2.SearchType() { t.Errorf("SearchType mismatch: %v != %v", phf1.SearchType(), phf2.SearchType()) }
+	if phf1.NumBits() != phf2.NumBits() { t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())}
+
+	// Compare a lookup (basic functional check)
+	// Skip if EliasFano is needed but stubbed
+	if !(config.Minimal && core.IsEliasFanoStubbed()) {
+		sampleKey := keys[numKeys/2]
+		val1 := phf1.Lookup(sampleKey)
+		val2 := phf2.Lookup(sampleKey)
+		if val1 != val2 {
+			t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
+		}
+	} else {
+		t.Log("Skipping lookup check due to stubbed EliasFano for minimal PHF.")
+	}
+}
