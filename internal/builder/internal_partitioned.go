@@ -479,3 +479,38 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) AvgPartitionSize() uint64 {
 	return pb.avgPartSize
 }
+
+// NumPartitions returns the number of partitions.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) NumPartitions() uint64 {
+	return pb.numPartitions
+}
+
+// Seed returns the seed used for hashing.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Seed() uint64 {
+	return pb.seed
+}
+
+// NumKeys returns the number of keys.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) NumKeys() uint64 {
+	return pb.numKeys
+}
+
+// TableSize returns the target total table size.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) TableSize() uint64 {
+	return pb.tableSize
+}
+
+// Partitioner returns the partitioner instance.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Partitioner() *core.RangeBucketer {
+	return &pb.partitioner
+}
+
+// Builders returns the slice of sub-builders.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Builders() []*InternalMemoryBuilderSinglePHF[K, H, B] {
+	return pb.subBuilders
+}
+
+// Offsets returns the array of offsets.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Offsets() []uint64 {
+	return pb.offsets
+}
