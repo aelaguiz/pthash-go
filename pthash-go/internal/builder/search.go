@@ -73,17 +73,35 @@ func searchSequentialXOR(
 	positions := make([]uint64, 0, core.MaxBucketSize) // Preallocate for max possible size
 
 	processedBuckets := uint64(0)
+	searchStartTime := time.Now()
+	log.Printf("Starting searchSequentialXOR: numKeys=%d, numBuckets=%d, tableSize=%d", 
+		numKeys, numBuckets, tableSize)
+		
 	for bucketsIt.HasNext() {
+		bucketStartTime := time.Now()
+		log.Printf("Processing bucket %d of %d (%v elapsed since search start)", 
+			processedBuckets+1, numNonEmptyBuckets, time.Since(searchStartTime))
+			
 		bucket := bucketsIt.Next()
 		bucketSize := bucket.Size()
 		if bucketSize == 0 {
+			log.Printf("WARNING: Empty bucket encountered (should not happen)")
 			continue // Should not happen with non-empty count, but safe check
 		}
 		bucketID := bucket.ID()
 		payloads := bucket.Payloads()
+		log.Printf("Bucket %d: size=%d, payloads=%v", bucketID, bucketSize, payloads)
 
 		foundPilot := false
+		pilotSearchStartTime := time.Now()
 		for pilot := uint64(0); ; pilot++ {
+			// Log progress every 100,000 iterations
+			if pilot > 0 && pilot%100000 == 0 {
+				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v", 
+					bucketID, bucketSize, pilot, time.Since(pilotSearchStartTime))
+				log.Printf("Payloads: %v", payloads)
+			}
+			
 			hashedPilot := uint64(0)
 			if pilot < searchCacheSize {
 				hashedPilot = hashedPilotsCache[pilot]
@@ -94,17 +112,26 @@ func searchSequentialXOR(
 			positions = positions[:0] // Clear slice, keep capacity
 			collisionFound := false
 
-			for _, pld := range payloads {
+			// For extensive debugging when stuck
+			if pilot > 0 && pilot%1000000 == 0 { // Log details once per million attempts
+				log.Printf("Detail for bucket %d (pilot=%d): tableSize=%d", bucketID, pilot, tableSize)
+			}
+
+			for i, pld := range payloads {
 				hash := pld // In single PHF, payload is hash.Second()
 				p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
+				
+				// Log detailed collision info occasionally
+				if pilot > 0 && pilot%1000000 == 0 {
+					log.Printf("  Payload[%d]=%d, XOR=%d, Position=%d, Taken=%v", 
+						i, pld, hash^hashedPilot, p, taken.Get(p))
+				}
 
 				// Check collision with already taken slots
-				// NOTE: This Get needs to work on the *builder* state during sequential build.
-				// The C++ uses a bit_vector::builder which allows get(). Go's builder needs this.
-				// For now, assume taken builder allows reads (might need adjustment).
-				// *** This read-from-builder is problematic for concurrent writes later! ***
-				// *** Let's add a temporary Get method to builder for sequential case. ***
-				if taken.Get(p) { // Need taken.Get(p) method on builder
+				if taken.Get(p) { 
+					if pilot > 0 && pilot%1000000 == 0 {
+						log.Printf("  Collision at position %d for payload %d", p, pld)
+					}
 					collisionFound = true
 					break
 				}
@@ -120,6 +147,9 @@ func searchSequentialXOR(
 			inBucketCollision := false
 			for i := 1; i < len(positions); i++ {
 				if positions[i] == positions[i-1] {
+					if pilot > 0 && pilot%1000000 == 0 {
+						log.Printf("  In-bucket collision: position %d appears multiple times", positions[i])
+					}
 					inBucketCollision = true
 					break
 				}
@@ -130,6 +160,9 @@ func searchSequentialXOR(
 
 			// Pilot found!
 			pilots.EmplaceBack(bucketID, pilot)
+			log.Printf("Found pilot %d for bucket %d after %v", 
+				pilot, bucketID, time.Since(bucketStartTime))
+				
 			for _, p := range positions {
 				taken.Set(p) // Mark slots as taken
 			}

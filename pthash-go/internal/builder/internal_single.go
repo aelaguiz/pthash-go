@@ -587,7 +587,11 @@ func (it *bucketsIteratorT) findNextNonEmptyBuffer() {
 
 // HasNext checks if there are more buckets to iterate.
 func (it *bucketsIteratorT) HasNext() bool {
-	return it.bufferIdx >= 0
+	isValid := it.bufferIdx >= 0
+	if !isValid {
+		log.Printf("Iterator exhausted: bufferIdx=%d", it.bufferIdx)
+	}
+	return isValid
 }
 
 // Next returns the next bucket and advances the iterator.
