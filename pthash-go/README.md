@@ -2,12 +2,12 @@
 
 A Go port of the PTHash library for fast and compact minimal perfect hash functions.
 
-**Status:** Under development (Phase 1 Complete)
+**Status:** Under development (Phase 2 Complete)
 
 ## Phases
 
 1.  [X] Foundation & Core Utilities
-2.  [ ] Bucketers & Simple Encoder
+2.  [X] Bucketers & Simple Encoder
 3.  [ ] Internal Memory Single Builder - Core Logic
 4.  [ ] Internal Memory Single PHF & Basic Testing
 5.  [ ] Partitioning Foundation
