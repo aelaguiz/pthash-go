@@ -71,15 +71,19 @@ func optimalParameterKiely(values []uint64) uint8 {
 	// Eq. (8) from Kiely, "Selecting the Golomb Parameter in Rice Coding", 2004.
 	// l = floor(log2(log(phi-1)/log(1-p))) + 1
 	// phi = (sqrt(5) + 1) / 2
-	const logPhiMinus1 = -0.34948500216 // log2(phi - 1) precomputed
+	const logPhiMinus1 = -0.48121182505960345 // Precomputed natural log: log(phi - 1)
 
-	log1MinusP := math.Log2(1.0 - p) // Use Log2 directly as in C++ formula
+	log1MinusP := math.Log(1.0 - p) // Use natural log (Log) for the inner ratio
 	if log1MinusP == 0 {             // Avoid division by zero if p is very close to 0
 		return 63 // Large parameter if p is tiny
 	}
 
 	val := logPhiMinus1 / log1MinusP
-	l_float := math.Floor(val) + 1.0
+	// Now take log2 of the ratio 'val' before floor+1
+	if val <= 0 { // log2 is undefined for non-positive
+		return 0 // Or some other default if ratio is non-positive
+	}
+	l_float := math.Floor(math.Log2(val)) + 1.0
 
 	if l_float < 0 {
 		return 0
