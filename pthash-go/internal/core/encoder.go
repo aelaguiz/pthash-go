@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"pthash-go/internal/util"
 )
 
 // Encoder defines the interface for encoding/decoding pilot values.
@@ -257,12 +258,12 @@ func (e *RiceEncoder) Size() uint64 {
 
 // MarshalBinary implements binary.BinaryMarshaler
 func (e *RiceEncoder) MarshalBinary() ([]byte, error) {
-	return tryMarshal(&e.values)
+	return util.TryMarshal(&e.values)
 }
 
 // UnmarshalBinary implements binary.BinaryUnmarshaler
 func (e *RiceEncoder) UnmarshalBinary(data []byte) error {
-	return tryUnmarshal(&e.values, data)
+	return util.TryUnmarshal(&e.values, data)
 }
 
 // --- CompactVector Implementation ---
@@ -470,14 +471,14 @@ func (e *CompactEncoder) Size() uint64 {
 
 // MarshalBinary implements binary.BinaryMarshaler
 func (e *CompactEncoder) MarshalBinary() ([]byte, error) {
-	return tryMarshal(e.values)
+	return util.TryMarshal(e.values)
 }
 
 // UnmarshalBinary implements binary.BinaryUnmarshaler
 func (e *CompactEncoder) UnmarshalBinary(data []byte) error {
 	// Need to reconstruct CompactVector first
 	e.values = &CompactVector{} // Create empty one
-	return tryUnmarshal(e.values, data)
+	return util.TryUnmarshal(e.values, data)
 }
 
 // --- Helper for RiceSequence: Rank/Select on BitVector ---
@@ -549,15 +550,6 @@ func (d *D1Array) UnmarshalBinary(data []byte) error {
 
 // --- Placeholder for other encoders ---
 
-// EliasFano is needed for minimal PHF free slots. Placeholder.
-type EliasFano struct { /* TODO */ }
-
-// DiffCompactEncoder for dense partitioned offsets. Placeholder.
-type DiffCompactEncoder struct {} // Empty placeholder
-
-// Constants for EliasFano and other encoders
-const logPhiMinus1 = -0.48121182505960345 // Pre-computed log(phi-1) = log(1/phi) = -log(phi)
-
 // EliasFano stores a monotone sequence compactly. Placeholder.
 type EliasFano struct {
 	// Internal data structures for lower/upper bits, rank/select
@@ -567,6 +559,12 @@ type EliasFano struct {
 	upperBits *BitVector
 	upperBitsSelect *D1Array // For select0 on upper bits
 }
+
+// DiffCompactEncoder for dense partitioned offsets. Placeholder.
+type DiffCompactEncoder struct {} // Empty placeholder
+
+// Constants for EliasFano and other encoders
+const logPhiMinus1 = -0.48121182505960345 // Pre-computed log(phi-1) = log(1/phi) = -log(phi)
 
 // NewEliasFano creates an empty EliasFano encoder.
 func NewEliasFano() *EliasFano {
