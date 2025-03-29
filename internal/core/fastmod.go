@@ -113,7 +113,7 @@ func FastModU64(a uint64, m M64, d uint64) uint64 {
 	// M = [m[1] << 64 | m[0]]
 	// lowbits = (m[1]*a << 64) + m[0]*a
 	p1h, p1l := bits.Mul64(m[0], a) // Low part product
-	p0h, p0l := bits.Mul64(m[1], a) // High part product
+	_, p0l := bits.Mul64(m[1], a)   // High part product
 
 	// Add the high part of the low product to the low part of the high product
 	// lowbits_lo = p1l
