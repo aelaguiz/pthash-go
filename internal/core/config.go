@@ -89,6 +89,7 @@ func DefaultBuildConfig() BuildConfig {
 // ComputeAvgPartitionSize adjusts and validates the average partition size.
 func ComputeAvgPartitionSize(numKeys uint64, config *BuildConfig) uint64 {
 	avgPartitionSize := config.AvgPartitionSize
+	fmt.Printf("[DEBUG] ComputeAvgPartitionSize: Input numKeys=%d, config.Avg=%d, config.Dense=%t\n", numKeys, config.AvgPartitionSize, config.DensePartitioning)
 	if avgPartitionSize == 0 { // Not partitioned explicitly
 		return 0
 	}
@@ -111,6 +112,7 @@ func ComputeAvgPartitionSize(numKeys uint64, config *BuildConfig) uint64 {
 		// Consider using a logger here
 		// fmt.Printf("Warning: Adjusted avg_partition_size to %d\n", avgPartitionSize)
 	}
+	fmt.Printf("[DEBUG] ComputeAvgPartitionSize: Returning %d\n", avgPartitionSize)
 	return avgPartitionSize
 }
 
@@ -125,10 +127,13 @@ func ComputeNumBuckets(numKeys uint64, avgBucketSize float64) uint64 {
 
 // ComputeNumPartitions calculates the number of partitions.
 func ComputeNumPartitions(numKeys uint64, avgPartitionSize uint64) uint64 {
+	fmt.Printf("[DEBUG] ComputeNumPartitions: Input numKeys=%d, avgPartitionSize=%d\n", numKeys, avgPartitionSize)
 	if avgPartitionSize == 0 {
 		return 0 // Or 1? C++ returns >= 1. Let's return 0 if not partitioned.
 	}
-	return uint64(math.Ceil(float64(numKeys) / float64(avgPartitionSize)))
+	result := uint64(math.Ceil(float64(numKeys) / float64(avgPartitionSize)))
+	fmt.Printf("[DEBUG] ComputeNumPartitions: Calculated partitions=%d\n", result)
+	return result
 }
 
 // MinimalTableSize calculates the target table size based on config.

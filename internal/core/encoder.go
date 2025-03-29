@@ -40,6 +40,7 @@ type RiceSequence struct {
 // Ported from C++ version's logic (using log2).
 func optimalParameterKiely(values []uint64) uint8 {
 	n := uint64(len(values))
+	fmt.Printf("[DEBUG] optimalParameterKiely: n=%d\n", n)
 	if n == 0 {
 		return 0 // Default parameter if no values
 	}
@@ -48,6 +49,7 @@ func optimalParameterKiely(values []uint64) uint8 {
 	for _, v := range values {
 		sum += v
 	}
+	fmt.Printf("[DEBUG] optimalParameterKiely: sum=%d\n", sum)
 
 	// Handle sum == 0 case to avoid division by zero
 	if sum == 0 {
@@ -58,6 +60,7 @@ func optimalParameterKiely(values []uint64) uint8 {
 
 	// Calculate p = n / (sum + n)
 	p := float64(n) / (float64(sum) + float64(n))
+	fmt.Printf("[DEBUG] optimalParameterKiely: p=%f\n", p)
 
 	// Avoid log(0) or log(negative) if p is 1 or invalid
 	if p <= 0 || p >= 1 {
@@ -74,16 +77,22 @@ func optimalParameterKiely(values []uint64) uint8 {
 	const logPhiMinus1 = -0.48121182505960345 // Precomputed natural log: log(phi - 1)
 
 	log1MinusP := math.Log(1.0 - p) // Use natural log (Log) for the inner ratio
+	fmt.Printf("[DEBUG] optimalParameterKiely: log(1-p)=%f\n", log1MinusP)
 	if log1MinusP == 0 {             // Avoid division by zero if p is very close to 0
 		return 63 // Large parameter if p is tiny
 	}
 
 	val := logPhiMinus1 / log1MinusP
+	fmt.Printf("[DEBUG] optimalParameterKiely: ratio val=%f\n", val)
 	// Now take log2 of the ratio 'val' before floor+1
 	if val <= 0 { // log2 is undefined for non-positive
+		fmt.Printf("[DEBUG] optimalParameterKiely: ratio val <= 0, returning 0\n")
 		return 0 // Or some other default if ratio is non-positive
 	}
-	l_float := math.Floor(math.Log2(val)) + 1.0
+	log2Val := math.Log2(val)
+	fmt.Printf("[DEBUG] optimalParameterKiely: log2(val)=%f\n", log2Val)
+	l_float := math.Floor(log2Val) + 1.0
+	fmt.Printf("[DEBUG] optimalParameterKiely: floor(log2(val))+1 = %f\n", l_float)
 
 	if l_float < 0 {
 		return 0
@@ -91,7 +100,9 @@ func optimalParameterKiely(values []uint64) uint8 {
 	if l_float >= 64 { // Clamp parameter L to be < 64 for uint64 lowBits
 		return 63
 	}
-	return uint8(l_float)
+	result := uint8(l_float)
+	fmt.Printf("[DEBUG] optimalParameterKiely: Returning l=%d\n", result)
+	return result
 }
 
 // Encode encodes the values using Rice coding.

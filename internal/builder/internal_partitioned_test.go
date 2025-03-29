@@ -21,6 +21,7 @@ func createPartitionedBuilder[K any, H core.Hasher[K], B core.Bucketer]() *Inter
 // Returns the calculated partition sizes for offset verification.
 func runPartitionBuild(t *testing.T, config core.BuildConfig, keys []uint64) (*InternalMemoryBuilderPartitionedPHF[uint64, core.XXHash128Hasher[uint64], *core.SkewBucketer], [][]core.Hash128, error) {
 	t.Helper()
+	t.Logf("[TEST_DEBUG] runPartitionBuild called with numKeys=%d, config.AvgPartitionSize=%d", len(keys), config.AvgPartitionSize)
 	if config.Seed == core.InvalidSeed {
 		config.Seed = 1 // Use a fixed default seed for deterministic tests
 	}
