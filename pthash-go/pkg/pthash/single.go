@@ -10,7 +10,7 @@ import (
 	
 	"pthash-go/internal/builder"
 	"pthash-go/internal/core"
-	"pthash-go/internal/util"
+	"pthash-go/pkg/serial"
 )
 
 // SinglePHF implements the non-partitioned PTHash function.
@@ -362,8 +362,8 @@ func tryMarshal(v interface{}) ([]byte, error) {
 	if marshaler, ok := v.(encoding.BinaryMarshaler); ok {
 		return marshaler.MarshalBinary()
 	}
-	// If not implemented, fallback to util implementation
-	return util.TryMarshal(v)
+	// If not implemented, fallback to serial implementation
+	return serial.TryMarshal(v)
 }
 
 // tryUnmarshal attempts to unmarshal data into a pointer if it implements BinaryUnmarshaler.
@@ -372,5 +372,5 @@ func tryUnmarshal(v interface{}, data []byte) error {
 	if unmarshaler, ok := v.(encoding.BinaryUnmarshaler); ok {
 		return unmarshaler.UnmarshalBinary(data)
 	}
-	return util.TryUnmarshal(v, data)
+	return serial.TryUnmarshal(v, data)
 }

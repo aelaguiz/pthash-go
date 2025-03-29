@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"pthash-go/internal/util"
+	"pthash-go/pkg/serial"
 )
 
 // Encoder defines the interface for encoding/decoding pilot values.
@@ -258,12 +258,12 @@ func (e *RiceEncoder) Size() uint64 {
 
 // MarshalBinary implements binary.BinaryMarshaler
 func (e *RiceEncoder) MarshalBinary() ([]byte, error) {
-	return util.TryMarshal(&e.values)
+	return serial.TryMarshal(&e.values)
 }
 
 // UnmarshalBinary implements binary.BinaryUnmarshaler
 func (e *RiceEncoder) UnmarshalBinary(data []byte) error {
-	return util.TryUnmarshal(&e.values, data)
+	return serial.TryUnmarshal(&e.values, data)
 }
 
 // --- CompactVector Implementation ---
@@ -372,7 +372,7 @@ func (cv *CompactVector) MarshalBinary() ([]byte, error) {
 		// Handle case where data might be nil (e.g., after build error?)
 		return nil, fmt.Errorf("CompactVector.MarshalBinary: data is nil")
 	}
-	return util.TryMarshal(cv.data) // Example: delegate, but needs width/size too
+	return serial.TryMarshal(cv.data) // Example: delegate, but needs width/size too
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
@@ -471,14 +471,14 @@ func (e *CompactEncoder) Size() uint64 {
 
 // MarshalBinary implements binary.BinaryMarshaler
 func (e *CompactEncoder) MarshalBinary() ([]byte, error) {
-	return util.TryMarshal(e.values)
+	return serial.TryMarshal(e.values)
 }
 
 // UnmarshalBinary implements binary.BinaryUnmarshaler
 func (e *CompactEncoder) UnmarshalBinary(data []byte) error {
 	// Need to reconstruct CompactVector first
 	e.values = &CompactVector{} // Create empty one
-	return util.TryUnmarshal(e.values, data)
+	return serial.TryUnmarshal(e.values, data)
 }
 
 // --- Helper for RiceSequence: Rank/Select on BitVector ---
