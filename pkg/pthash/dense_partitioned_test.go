@@ -6,6 +6,7 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"pthashgo/pkg/pthash"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -159,11 +160,11 @@ func TestDensePHFSerialization(t *testing.T) {
 	config := core.DefaultBuildConfig()
 	config.Alpha = 0.98
 	config.Lambda = 6.0
-	config.Minimal = true             // Dense is typically minimal
+	config.Minimal = true              // Dense is typically minimal
 	config.Search = core.SearchTypeAdd // Dense uses Additive
 	config.Verbose = false
 	config.NumThreads = 2
-	config.Seed = 918273              // Fixed seed
+	config.Seed = 918273 // Fixed seed
 	config.AvgPartitionSize = avgPartSize
 	config.DensePartitioning = true // Enable dense mode
 
@@ -181,8 +182,8 @@ func TestDensePHFSerialization(t *testing.T) {
 	_, err = phf1.Build(builderInst, &config)
 	if err != nil {
 		if (core.IsEliasFanoStubbed() && config.Minimal) ||
-		   phf1.OffsetsNotImplemented() ||
-		   reflect.TypeOf(new(E)).Elem().Name() == "DenseMono[*core.RiceEncoder]" && core.IsD1ArraySelectStubbed() { // Check specific dependencies
+			phf1.OffsetsNotImplemented() ||
+			reflect.TypeOf(new(E)).Elem().Name() == "DenseMono[*core.RiceEncoder]" && core.IsD1ArraySelectStubbed() { // Check specific dependencies
 			t.Skipf("Skipping serialization test: Dense PHF requires functional EliasFano, CompactVector, RiceEncoder/D1Array (stub detected): %v", err)
 		}
 		t.Fatalf("phf1.Build failed: %v", err)
@@ -207,13 +208,22 @@ func TestDensePHFSerialization(t *testing.T) {
 	}
 
 	// --- Compare ---
-	if phf1.Seed() != phf2.Seed() { t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed()) }
-	if phf1.NumKeys() != phf2.NumKeys() { t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys()) }
-	if phf1.TableSize() != phf2.TableSize() { t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize()) }
-	if phf1.IsMinimal() != phf2.IsMinimal() { t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal()) }
+	if phf1.Seed() != phf2.Seed() {
+		t.Errorf("Seed mismatch: %d != %d", phf1.Seed(), phf2.Seed())
+	}
+	if phf1.NumKeys() != phf2.NumKeys() {
+		t.Errorf("NumKeys mismatch: %d != %d", phf1.NumKeys(), phf2.NumKeys())
+	}
+	if phf1.TableSize() != phf2.TableSize() {
+		t.Errorf("TableSize mismatch: %d != %d", phf1.TableSize(), phf2.TableSize())
+	}
+	if phf1.IsMinimal() != phf2.IsMinimal() {
+		t.Errorf("IsMinimal mismatch: %t != %t", phf1.IsMinimal(), phf2.IsMinimal())
+	}
 	// Cannot easily compare internal fields like partitioner, subBucketer, pilots, offsets directly
-	if phf1.NumBits() != phf2.NumBits() { t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())}
-
+	if phf1.NumBits() != phf2.NumBits() {
+		t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())
+	}
 
 	// Compare a lookup (basic functional check)
 	if !(config.Minimal && (core.IsEliasFanoStubbed() || phf1.OffsetsNotImplemented())) { // Skip if EF or Offsets missing
@@ -231,11 +241,11 @@ func TestDensePHFSerialization(t *testing.T) {
 // Helper to check if D1Array.Select is likely stubbed (e.g., returns constant)
 // This is brittle, ideally D1Array would have an IsStubbed method.
 func (ef *core.EliasFano) IsStubbed() bool {
-    // A simple check: if NumBits is always 0 for a non-empty structure, it's likely a stub.
-    // Let's encode a single value and check NumBits.
-    tempEF := core.NewEliasFano()
-    _ = tempEF.Encode([]uint64{10})
-    // A real EF should use more bits than just the base field sizes (~24 bytes = 192 bits)
+	// A simple check: if NumBits is always 0 for a non-empty structure, it's likely a stub.
+	// Let's encode a single value and check NumBits.
+	tempEF := core.NewEliasFano()
+	_ = tempEF.Encode([]uint64{10})
+	// A real EF should use more bits than just the base field sizes (~24 bytes = 192 bits)
 	// A stub might only marshal the metadata. Let's use a threshold like 64 bytes = 512 bits.
-    return tempEF.NumBits() < 512
+	return tempEF.NumBits() < 512
 }
