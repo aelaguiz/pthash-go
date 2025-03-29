@@ -372,7 +372,7 @@ func (cv *CompactVector) MarshalBinary() ([]byte, error) {
 		// Handle case where data might be nil (e.g., after build error?)
 		return nil, fmt.Errorf("CompactVector.MarshalBinary: data is nil")
 	}
-	return nil, fmt.Errorf("CompactVector.MarshalBinary not implemented")
+	return util.TryMarshal(cv.data) // Example: delegate, but needs width/size too
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
