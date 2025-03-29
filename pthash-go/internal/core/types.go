@@ -60,3 +60,41 @@ func (bpp BucketPayloadPair) Less(other BucketPayloadPair) bool {
 func (bpp BucketPayloadPair) String() string {
 	return fmt.Sprintf("{BucketID: %d, Payload: %d}", bpp.BucketID, bpp.Payload)
 }
+
+// BucketT provides a view over a slice representing a single bucket's data.
+// The underlying slice typically contains [bucket_id, payload1, payload2, ...].
+type BucketT struct {
+	data []uint64 // Slice containing [id, p1, p2, ...]
+	size BucketSizeType
+}
+
+// NewBucketT creates a BucketT view. data slice must contain id + size elements.
+func NewBucketT(dataSlice []uint64, size BucketSizeType) BucketT {
+	if len(dataSlice) != 1+int(size) {
+		// Or return an error? Panic indicates internal logic error.
+		panic(fmt.Sprintf("NewBucketT: dataSlice length %d does not match size %d", len(dataSlice), size))
+	}
+	return BucketT{data: dataSlice, size: size}
+}
+
+// ID returns the bucket ID.
+func (b BucketT) ID() BucketIDType {
+	if len(b.data) == 0 {
+		panic("ID() called on empty BucketT data")
+	}
+	// Assume ID fits in BucketIDType
+	return BucketIDType(b.data[0])
+}
+
+// Payloads returns a slice containing only the payload values.
+func (b BucketT) Payloads() []uint64 {
+	if len(b.data) <= 1 {
+		return []uint64{} // Return empty slice if no payloads
+	}
+	return b.data[1:]
+}
+
+// Size returns the number of payloads in the bucket.
+func (b BucketT) Size() BucketSizeType {
+	return b.size
+}

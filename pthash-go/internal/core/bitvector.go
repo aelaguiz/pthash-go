@@ -196,6 +196,44 @@ func (b *BitVectorBuilder) grow(needed uint64) {
 	}
 }
 
+// Get returns the bit value at the given position.
+// This is used during search to check for collisions.
+func (b *BitVectorBuilder) Get(pos uint64) bool {
+	if pos >= b.size {
+		// Reading beyond current size conceptually returns 0/false
+		return false
+	}
+	wordIndex := pos / 64
+	bitIndex := pos % 64
+	if wordIndex >= uint64(len(b.words)) {
+		// Accessing word that hasn't been allocated yet
+		return false
+	}
+	return (b.words[wordIndex] & (1 << bitIndex)) != 0
+}
+
+// Set sets the bit at the given position to 1.
+// This is used during search to mark taken positions.
+func (b *BitVectorBuilder) Set(pos uint64) {
+	if pos >= b.capacity {
+		b.grow(pos - b.size + 1) // Grow enough to include pos
+	}
+	wordIndex := pos / 64
+	bitIndex := pos % 64
+	if wordIndex >= uint64(len(b.words)) { // Ensure word exists after potential grow
+		neededLen := wordIndex + 1
+		if neededLen > uint64(cap(b.words)) {
+			// Should not happen if grow worked correctly
+			panic("Set after grow failed")
+		}
+		b.words = b.words[:neededLen]
+	}
+	b.words[wordIndex] |= (1 << bitIndex)
+	if pos >= b.size { // Update size if we set a bit beyond the current end
+		b.size = pos + 1
+	}
+}
+
 // PushBack appends a single bit (true=1, false=0).
 func (b *BitVectorBuilder) PushBack(bit bool) {
 	b.grow(1)
