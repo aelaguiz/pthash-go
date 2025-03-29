@@ -169,7 +169,7 @@ func TestSearchSequentialAdd(t *testing.T) {
 	config.Seed = configSeed // Ensure search uses the same seed
 
 	// Create a dummy logger
-	logger := NewSearchLogger[core.SkewBucketer](numKeys, uint64(bucketID+1), nil, false)
+	logger := NewSearchLogger(numKeys, uint64(bucketID+1), new(core.SkewBucketer), false)
 
 	// --- Execute Additive Search ---
 	err := searchSequentialAdd(
@@ -214,7 +214,7 @@ func TestSearchSequentialAdd(t *testing.T) {
 		t.Errorf("Expected %d unique positions, got %d", numKeys, len(positionsMap))
 	}
 }
-func TestSearchSequentialAdd(t *testing.T) {
+func TestSearchSequentialAdd_SecondTest(t *testing.T) {
 	// Setup similar to TestPilotSearchIsolatedBucket226 but for Additive
 	configSeed := uint64(42)
 	numKeys := uint64(40)
@@ -253,7 +253,7 @@ func TestSearchSequentialAdd(t *testing.T) {
 	config.Seed = configSeed // Ensure search uses the same seed
 
 	// Create a dummy logger
-	logger := NewSearchLogger[core.SkewBucketer](numKeys, uint64(bucketID+1), nil, false)
+	logger := NewSearchLogger(numKeys, uint64(bucketID+1), new(core.SkewBucketer), false)
 
 	// --- Execute Additive Search ---
 	err := searchSequentialAdd(
