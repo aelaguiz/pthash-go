@@ -8,7 +8,6 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"pthashgo/pkg/pthash"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -88,8 +87,8 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 	// Use specific types for testing
 	type K = uint64
 	type H = core.XXHash128Hasher[K] // Hasher type (value)
-	type B = core.SkewBucketer      // Bucketer type (value)
-	type E = core.RiceEncoder // Need to use pointer type since methods have pointer receivers
+	type B = core.SkewBucketer       // Bucketer type (value)
+	type E = core.RiceEncoder        // Need to use pointer type since methods have pointer receivers
 
 	seed := uint64(time.Now().UnixNano())
 	numKeysList := []uint64{10000} // Faster CI
@@ -117,7 +116,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								config.Minimal = minimal
 								config.Search = searchType
 								config.Verbose = false // Keep tests quiet unless debugging
-								config.NumThreads = 1 // FORCE SEQUENTIAL for this check
+								config.NumThreads = 1  // FORCE SEQUENTIAL for this check
 								// Use a fixed seed for reproducibility within a test run
 								config.Seed = uint64(rand.Int63()) // Fixed random seed per subtest
 
