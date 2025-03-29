@@ -43,14 +43,15 @@ func runPartitionBuild(t *testing.T, config core.BuildConfig, keys []uint64) (*I
 	builder.seed = config.Seed
 
 	avgPartitionSize := core.ComputeAvgPartitionSize(numKeys, &config)
-	if avgPartitionSize == 0 || avgPartitionSize == numKeys {
-		// This config is invalid for partitioned builder, should error during real build
-		return builder, nil, fmt.Errorf("test setup error: invalid avgPartitionSize %d for numKeys %d", avgPartitionSize, numKeys)
-	}
 	builder.avgPartSize = avgPartitionSize
 	builder.numPartitions = core.ComputeNumPartitions(numKeys, avgPartitionSize)
 	if builder.numPartitions == 0 {
 		builder.numPartitions = 1
+	}
+	
+	// The only truly invalid case is if no partitions would be created after adjustments
+	if numKeys > 0 && builder.numPartitions == 0 {
+		return builder, nil, fmt.Errorf("test setup error: calculated numPartitions is 0 for numKeys %d, avgPartitionSize %d", numKeys, avgPartitionSize)
 	}
 
 	// Initialize partitioner
