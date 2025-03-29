@@ -2,4 +2,4 @@ module pthashgo
 
 go 1.20
 
-require github.com/cespare/xxhash/v2 v2.2.0
+require github.com/cespare/xxhash/v2 v2.3.0

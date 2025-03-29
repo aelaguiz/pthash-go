@@ -48,13 +48,17 @@ func (h XXHash128Hasher[K]) Hash(key K, seed uint64) Hash128 {
 		panic(fmt.Sprintf("XXHash128Hasher: unsupported key type %T", key))
 	}
 }
-
-// hashBytesXXH128 computes the 128-bit hash for a byte slice.
 func hashBytesXXH128(key []byte, seed uint64) Hash128 {
-	// cespare/xxhash Digest.Sum128 is what we want, but Digest needs allocation.
-	// Seed needs to be incorporated. Let's use Sum64 twice with different seeds.
-	h1 := xxhash.Sum64(key)
-	h2 := xxhash.Sum64(key)
+	// *** CORRECTED IMPLEMENTATION ***
+	// Use xxhash.NewS to create seeded digests and Sum64() method.
+	digest1 := xxhash.NewWithSeed(seed)
+	_, _ = digest1.Write(key) // Write data to the first digest (ignore errors)
+	h1 := digest1.Sum64()
+
+	digest2 := xxhash.NewWithSeed(^seed) // Use different seed for the second part
+	_, _ = digest2.Write(key)            // Write data to the second digest (ignore errors)
+	h2 := digest2.Sum64()
+
 	return Hash128{High: h1, Low: h2}
 }
 

@@ -17,8 +17,8 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 	// Use specific types for testing
 	type K = uint64
 	type H = core.XXHash128Hasher[K]
-	type B = core.SkewBucketer // Sub-builder bucketer
-	type E = core.RiceEncoder  // Sub-builder encoder
+	type B = *core.SkewBucketer // Sub-builder bucketer
+	type E = *core.RiceEncoder  // Sub-builder encoder
 
 	seed := uint64(time.Now().UnixNano())
 	// Use smaller number of keys but ensure partitioning happens
@@ -36,7 +36,9 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 		}
 
 		for _, avgPartSize := range avgPartSizes {
-			if avgPartSize >= numKeys { continue } // Skip if partition size >= num keys
+			if avgPartSize >= numKeys {
+				continue
+			} // Skip if partition size >= num keys
 
 			t.Run(fmt.Sprintf("N=%d_P=%d", numKeys, avgPartSize), func(t *testing.T) {
 
@@ -82,7 +84,6 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 										buildTimings.SearchingMicroseconds,
 										encodeTime)
 
-
 									// --- Check Correctness ---
 									err = check[K](keys, finalPHF) // Use the same check function
 									if err != nil {
@@ -99,25 +100,24 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 
 									// TODO: Add serialization check later
 									/*
-									data, err := finalPHF.MarshalBinary()
-									if err != nil {
-										t.Fatalf("MarshalBinary failed: %v", err)
-									}
-									newPHF := pthash.NewPartitionedPHF[K, H, B, E](minimal, searchType)
-									err = newPHF.UnmarshalBinary(data)
-									if err != nil {
-										t.Fatalf("UnmarshalBinary failed: %v", err)
-									}
-									// Re-check the loaded function
-									err = check[K](keys, newPHF)
-									if err != nil {
-										t.Errorf("Correctness check failed after load: %v", err)
-									}
-									if finalPHF.NumBits() != newPHF.NumBits() {
-									    t.Errorf("NumBits mismatch after load: %d != %d", finalPHF.NumBits(), newPHF.NumBits())
-									}
+										data, err := finalPHF.MarshalBinary()
+										if err != nil {
+											t.Fatalf("MarshalBinary failed: %v", err)
+										}
+										newPHF := pthash.NewPartitionedPHF[K, H, B, E](minimal, searchType)
+										err = newPHF.UnmarshalBinary(data)
+										if err != nil {
+											t.Fatalf("UnmarshalBinary failed: %v", err)
+										}
+										// Re-check the loaded function
+										err = check[K](keys, newPHF)
+										if err != nil {
+											t.Errorf("Correctness check failed after load: %v", err)
+										}
+										if finalPHF.NumBits() != newPHF.NumBits() {
+										    t.Errorf("NumBits mismatch after load: %d != %d", finalPHF.NumBits(), newPHF.NumBits())
+										}
 									*/
-
 
 								}) // End subtest t.Run
 							} // End minimal loop

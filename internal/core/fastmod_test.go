@@ -1,7 +1,10 @@
 package core
 
 import (
+	"math"
+	"math/rand"
 	"testing"
+	"time"
 )
 
 func TestFastModU64Basic(t *testing.T) {
@@ -58,6 +61,42 @@ func TestFastModU64Distribution(t *testing.T) {
 	for pos, count := range positions {
 		if count > 1 {
 			t.Logf("Position %d appears %d times", pos, count)
+		}
+	}
+}
+
+// (Add this test case or enhance existing random test)
+func TestFastModU64EdgesAndMoreRandom(t *testing.T) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	numTests := 50000 // Increase iterations
+
+	divisors := []uint64{1, 2, 3, 10, 1020, 9223372036854775807, 18446744073709551615} // Specific divisors
+
+	for _, d := range divisors {
+		if d == 0 {
+			continue
+		}
+		m := ComputeM64(d)
+		inputs := []uint64{0, 1, d - 1, d, d + 1, math.MaxUint64} // Specific inputs
+		// Add random inputs for this divisor
+		for i := 0; i < numTests/len(divisors); i++ {
+			inputs = append(inputs, rng.Uint64())
+		}
+
+		for _, a := range inputs {
+			expectedMod := a % d
+			actualMod := FastModU64(a, m, d)
+			if expectedMod != actualMod {
+				t.Fatalf("[d=%d] FastModU64(%d, m, %d) = %d, want %d", d, a, d, actualMod, expectedMod)
+			}
+
+			if d > 1 {
+				expectedDiv := a / d
+				actualDiv := FastDivU64(a, m)
+				if expectedDiv != actualDiv {
+					t.Fatalf("[d=%d] FastDivU64(%d, m) = %d, want %d", d, a, actualDiv, expectedDiv)
+				}
+			}
 		}
 	}
 }

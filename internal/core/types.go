@@ -110,3 +110,9 @@ func (b BucketT) Payloads() []uint64 {
 func (b BucketT) Size() BucketSizeType {
 	return b.size
 }
+
+// pthash-go/internal/core/types.go
+// Add this method to BucketT struct
+func (b BucketT) Data() []uint64 {
+	return b.data
+}
