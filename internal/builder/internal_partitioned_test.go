@@ -207,7 +207,6 @@ func TestPartitioningParallel(t *testing.T) {
 func TestPartitioningOffsetCalculation(t *testing.T) {
 	numKeys := uint64(2000)
 	avgPartitionSize := uint64(500)
-	numPartitions := uint64(4)
 	keys := util.DistinctUints64(numKeys, 789)
 
 	scenarios := []struct {
@@ -288,8 +287,10 @@ func TestPartitioningOffsetCalculation(t *testing.T) {
 				t.Fatalf("runPartitionBuild failed: %v", err)
 			}
 
-			if builder.NumPartitions() != numPartitions {
-				t.Fatalf("Expected %d partitions, got %d", numPartitions, builder.NumPartitions())
+			// Calculate expected partitions AFTER constraints (MinPartitionSize = 1000)
+			expectedPartitions := uint64(2) // ceil(2000/1000)
+			if builder.NumPartitions() != expectedPartitions {
+				t.Fatalf("Expected %d partitions, got %d", expectedPartitions, builder.NumPartitions())
 			}
 
 			// Get actual partition sizes
@@ -320,7 +321,6 @@ func TestPartitioningOffsetCalculation(t *testing.T) {
 func TestPartitioningAccessors(t *testing.T) {
 	numKeys := uint64(100)
 	avgPartitionSize := uint64(20)
-	numPartitions := uint64(5)
 	seed := uint64(999)
 	keys := util.DistinctUints64(numKeys, seed)
 
@@ -341,13 +341,16 @@ func TestPartitioningAccessors(t *testing.T) {
 	if builder.NumKeys() != numKeys {
 		t.Errorf("NumKeys() mismatch: got %d, want %d", builder.NumKeys(), numKeys)
 	}
-	if builder.NumPartitions() != numPartitions {
-		t.Errorf("NumPartitions() mismatch: got %d, want %d", builder.NumPartitions(), numPartitions)
+	// When avgPartitionSize=20, it's adjusted to min(numKeys, MinPartitionSize)=100
+	// So expected partitions = ceil(100/100) = 1
+	expectedPartitions := uint64(1)
+	if builder.NumPartitions() != expectedPartitions {
+		t.Errorf("NumPartitions() mismatch: got %d, want %d", builder.NumPartitions(), expectedPartitions)
 	}
 	// Use a pointer method call for partitioner
 	p := builder.Partitioner()
-	if p.NumBuckets() != numPartitions {
-		t.Errorf("Partitioner().NumBuckets() mismatch: got %d, want %d", p.NumBuckets(), numPartitions)
+	if p.NumBuckets() != expectedPartitions {
+		t.Errorf("Partitioner().NumBuckets() mismatch: got %d, want %d", p.NumBuckets(), expectedPartitions)
 	}
 	// Cannot easily check TableSize without running sub-builds fully
 }
