@@ -3,6 +3,7 @@ package builder
 import (
 	"container/heap"
 	"fmt"
+	"log"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"sort"
