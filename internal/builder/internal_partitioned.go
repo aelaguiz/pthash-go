@@ -19,11 +19,17 @@ type InternalMemoryBuilderPartitionedPHF[K any, H core.Hasher[K], B core.Buckete
 	partitioner   core.RangeBucketer // Bucketer used to partition keys
 	hasher        H                  // Hasher instance
 
+	// Intermediate results stored in the builder
+	partitionBuffers [][]core.Hash128 // Hashes belonging to each partition
+
 	// Results of the build process (passed to PartitionedPHF.Build)
 	offsets                []uint64                                   // Start offset for each partition's output range
 	subBuilders            []*InternalMemoryBuilderSinglePHF[K, H, B] // Builders for each partition's sub-PHF
 	avgPartSize            uint64                                     // Calculated avg partition size
 	numBucketsPerPartition uint64                                     // Calculated for sub-builders
+
+	// Timings accumulated during the build process
+	timings core.BuildTimings
 }
 
 // NewInternalMemoryBuilderPartitionedPHF creates a new partitioned builder.
@@ -35,8 +41,8 @@ func NewInternalMemoryBuilderPartitionedPHF[K any, H core.Hasher[K], B core.Buck
 	}
 }
 
-// BuildFromKeys orchestrates the partitioned build process.
-// For Phase 5, it focuses on partitioning and setup. Phase 6 will build sub-PHFs.
+// BuildFromKeys orchestrates the partitioned build process, including partitioning
+// and building sub-PHFs. It stores the final state needed by PartitionedPHF.Build.
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, config core.BuildConfig) (core.BuildTimings, error) {
 	numKeys := uint64(len(keys))
 	if numKeys == 0 {
@@ -44,17 +50,18 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 	}
 	pb.config = config
 	pb.numKeys = numKeys
+	pb.timings = core.BuildTimings{} // Reset timings
 
 	// Check hash collision probability
 	err := core.CheckHashCollisionProbability[K, H](numKeys)
 	if err != nil {
-		return core.BuildTimings{}, err
+		return pb.timings, err
 	}
 
 	// Determine number of partitions
 	avgPartitionSize := core.ComputeAvgPartitionSize(numKeys, &config)
 	if avgPartitionSize == 0 || avgPartitionSize == numKeys {
-		return core.BuildTimings{}, fmt.Errorf("partitioned builder requires AvgPartitionSize > 0 and < numKeys (effective size was %d)", avgPartitionSize)
+		return pb.timings, fmt.Errorf("partitioned builder requires AvgPartitionSize > 0 and < numKeys (effective size was %d)", avgPartitionSize)
 	}
 	pb.avgPartSize = avgPartitionSize
 	pb.numPartitions = core.ComputeNumPartitions(numKeys, avgPartitionSize)
@@ -65,8 +72,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 	util.Log(config.Verbose, "Num Partitions = %d", pb.numPartitions)
 	util.Log(config.Verbose, "Avg Partition Size = %d", avgPartitionSize)
 
-	var timings core.BuildTimings
-	start := time.Now()
+	partitionStart := time.Now()
 
 	// Initialize seed
 	if config.Seed == core.InvalidSeed {
@@ -79,40 +85,37 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 	// Initialize partitioner
 	err = pb.partitioner.Init(pb.numPartitions, 0, 0, 0) // RangeBucketer ignores other params
 	if err != nil {
-		return timings, fmt.Errorf("failed to init partitioner: %w", err)
+		return pb.timings, fmt.Errorf("failed to init partitioner: %w", err)
 	}
 
 	// --- Partition Keys ---
-	// Create buffers to hold hashes for each partition
-	partitionBuffers := make([][]core.Hash128, pb.numPartitions)
-	for i := range partitionBuffers {
-		// Preallocate based on average size, add some slack
+	pb.partitionBuffers = make([][]core.Hash128, pb.numPartitions)
+	for i := range pb.partitionBuffers {
 		allocHint := uint64(float64(avgPartitionSize) * 1.1)
-		if allocHint == 0 {
-			allocHint = 10 // Minimum allocation
-		}
-		partitionBuffers[i] = make([]core.Hash128, 0, allocHint)
+		if allocHint == 0 { allocHint = 10 }
+		pb.partitionBuffers[i] = make([]core.Hash128, 0, allocHint)
 	}
 
-	// Hash keys and distribute into partition buffers
-	if config.NumThreads > 1 && numKeys >= uint64(config.NumThreads)*100 { // Heuristic for parallelism
+	if config.NumThreads > 1 && numKeys >= uint64(config.NumThreads)*100 {
 		util.Log(config.Verbose, "Partitioning keys in parallel (%d threads)...", config.NumThreads)
-		pb.parallelHashAndPartition(keys, partitionBuffers)
+		pb.parallelHashAndPartition(keys, pb.partitionBuffers)
 	} else {
 		util.Log(config.Verbose, "Partitioning keys sequentially...")
 		for _, key := range keys {
 			hash := pb.hasher.Hash(key, pb.seed)
-			partitionIdx := pb.partitioner.Bucket(hash.Mix()) // Use Mix() for partitioning
+			partitionIdx := pb.partitioner.Bucket(hash.Mix())
 			if partitionIdx >= pb.numPartitions {
-				// This indicates an issue with RangeBucketer logic or hash distribution
-				return timings, fmt.Errorf("internal error: partition index %d out of bounds (%d)", partitionIdx, pb.numPartitions)
+				return pb.timings, fmt.Errorf("internal error: partition index %d out of bounds (%d)", partitionIdx, pb.numPartitions)
 			}
-			partitionBuffers[partitionIdx] = append(partitionBuffers[partitionIdx], hash)
+			pb.partitionBuffers[partitionIdx] = append(pb.partitionBuffers[partitionIdx], hash)
 		}
 	}
 	util.Log(config.Verbose, "Partitioning complete.")
+	pb.timings.PartitioningMicroseconds = time.Since(partitionStart)
+	util.Log(config.Verbose, "Partitioning took: %v", pb.timings.PartitioningMicroseconds)
 
 	// --- Calculate Offsets and Initialize Sub-Builders ---
+	offsetStart := time.Now()
 	pb.offsets = make([]uint64, pb.numPartitions+1)
 	pb.subBuilders = make([]*InternalMemoryBuilderSinglePHF[K, H, B], pb.numPartitions)
 	pb.tableSize = 0 // Total size across all partitions
@@ -121,70 +124,52 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 
 	cumulativeOffset := uint64(0)
 	for i := uint64(0); i < pb.numPartitions; i++ {
-		partitionSize := uint64(len(partitionBuffers[i]))
-		if partitionSize == 0 && config.Verbose {
-			util.Log(true, "Warning: Partition %d is empty.", i)
-		}
+		partitionSize := uint64(len(pb.partitionBuffers[i]))
 
-		// Calculate sub-table size for this partition
 		subTableSize := uint64(0)
 		if partitionSize > 0 {
 			subTableSize = core.MinimalTableSize(partitionSize, config.Alpha, config.Search)
 		}
-
-		pb.tableSize += subTableSize // Accumulate total table size estimate
-
+		pb.tableSize += subTableSize
 		pb.offsets[i] = cumulativeOffset
 
-		// Calculate offset increment based on minimal/dense config
 		offsetIncrement := uint64(0)
 		if config.DensePartitioning {
-			// In dense mode, offset is based on sub-table size (like C++)
 			offsetIncrement = subTableSize
 		} else {
-			// In standard minimal mode, offset is based on actual keys in partition
-			if config.Minimal {
-				offsetIncrement = partitionSize
-			} else {
-				offsetIncrement = subTableSize
-			}
+			if config.Minimal { offsetIncrement = partitionSize } else { offsetIncrement = subTableSize }
 		}
 		cumulativeOffset += offsetIncrement
 
-		// Initialize the sub-builder (it will be populated in Phase 6)
-		// Create zero value bucketer instance for the sub-builder
-		var subBucketer B
-		// If B is a pointer type (*core.SkewBucketer), create it like this:
-		// subBucketer = new(core.SkewBucketer) // Assuming B is *core.SkewBucketer
-		// This needs careful handling based on whether B is value or pointer type.
-		// Assuming B is a value type for now based on previous phases.
-		pb.subBuilders[i] = NewInternalMemoryBuilderSinglePHF[K, H, B](pb.hasher, subBucketer) // Pass hasher and zero bucketer
-
-		// *** Phase 6 Action: ***
-		// *** Call pb.subBuilders[i].BuildFromHashes(partitionBuffers[i], subConfig) here ***
-		// For Phase 5, we only set up the structures.
-		// We need to store the hashes temporarily or pass them to Phase 6.
-		// Let's store them *in* the sub-builders for now (requires adding a field).
-		// Or, pass partitionBuffers to the next stage. Let's pass partitionBuffers.
+		var subBucketer B // Create zero value bucketer instance
+		// If B is a pointer type, this needs adjustment like: subBucketer = new(ActualType)
+		pb.subBuilders[i] = NewInternalMemoryBuilderSinglePHF[K, H, B](pb.hasher, subBucketer)
 	}
-	pb.offsets[pb.numPartitions] = cumulativeOffset // Final offset
+	pb.offsets[pb.numPartitions] = cumulativeOffset
+	// Offset calculation is part of partitioning timing? Or separate setup time? Let's include in partitioning.
+	pb.timings.PartitioningMicroseconds += time.Since(offsetStart)
 
-	timings.PartitioningMicroseconds = time.Since(start)
-	util.Log(config.Verbose, "Partitioning and setup took: %v", timings.PartitioningMicroseconds)
 
-	// --- Phase 6: Build Sub-PHFs ---
-	// In this phase, we stop here. Phase 6 will take partitionBuffers and pb.subBuilders
-	// and execute the build for each sub-builder.
+	// --- Build Sub-PHFs ---
+	subBuildTimings, err := pb.BuildSubPHFs(config) // Build using internal buffers
+	if err != nil {
+		// Check if it's a seed error, allow caller to potentially retry
+		if _, ok := err.(core.SeedRuntimeError); ok {
+			return pb.timings, err // Propagate seed error
+		}
+		return pb.timings, fmt.Errorf("failed during sub-PHF build stage: %w", err)
+	}
 
-	// We need a way to pass the partition data to the next stage/caller.
-	// Let's return the partition buffers along with the builder state for now.
-	// The final PHF build method will call this, then call buildSubPHFs.
+	// Accumulate timings from sub-builds
+	pb.timings.MappingOrderingMicroseconds = subBuildTimings.MappingOrderingMicroseconds
+	pb.timings.SearchingMicroseconds = subBuildTimings.SearchingMicroseconds
+	// Encoding time happens when the final PHF calls Build, not here.
 
-	// Store partition data within the builder itself temporarily for phase 5/6 transition?
-	// Or require the caller (the final PHF Build method) to manage it?
-	// Let's assume the final PHF Build method manages it. This builder focuses on partitioning.
+	// Release partition buffers memory after sub-builds are done
+	pb.partitionBuffers = nil
 
-	return timings, nil
+	util.Log(config.Verbose, "Partitioned builder finished initial stages.")
+	return pb.timings, nil
 }
 
 // parallelHashAndPartition distributes keys into partitions concurrently.
@@ -192,11 +177,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) parallelHashAndPartition
 	numKeys := uint64(len(keys))
 	numThreads := pb.config.NumThreads
 	keysPerThread := numKeys / uint64(numThreads)
-
-	// Use mutexes for each partition buffer slice append, as append can reallocate.
-	// Consider pre-allocating large enough, or using channels, or thread-local buffers + merge later for better performance.
 	bufferMutexes := make([]sync.Mutex, pb.numPartitions)
-
 	var wg sync.WaitGroup
 	wg.Add(numThreads)
 
@@ -205,18 +186,21 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) parallelHashAndPartition
 			defer wg.Done()
 			start := uint64(threadID) * keysPerThread
 			end := start + keysPerThread
-			if threadID == numThreads-1 {
-				end = numKeys // Last thread takes the rest
-			}
+			if threadID == numThreads-1 { end = numKeys }
+
+			localBuffers := make(map[uint64][]core.Hash128) // Thread-local temporary storage
 
 			for i := start; i < end; i++ {
 				key := keys[i]
 				hash := pb.hasher.Hash(key, pb.seed)
-				partitionIdx := pb.partitioner.Bucket(hash.Mix()) // Use Mix() for partitioning
+				partitionIdx := pb.partitioner.Bucket(hash.Mix())
+				localBuffers[partitionIdx] = append(localBuffers[partitionIdx], hash)
+			}
 
-				// Lock the specific buffer, append, unlock
+			// Append thread-local results to global buffers under lock
+			for partitionIdx, hashes := range localBuffers {
 				bufferMutexes[partitionIdx].Lock()
-				partitionBuffers[partitionIdx] = append(partitionBuffers[partitionIdx], hash)
+				partitionBuffers[partitionIdx] = append(partitionBuffers[partitionIdx], hashes...)
 				bufferMutexes[partitionIdx].Unlock()
 			}
 		}(tid)
@@ -224,36 +208,12 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) parallelHashAndPartition
 	wg.Wait()
 }
 
-// --- Accessors for Partitioned Builder ---
+// --- Accessors needed by PartitionedPHF.Build ---
+// Already defined in previous phase: Seed, NumKeys, TableSize, NumPartitions, Partitioner, Offsets, Builders, NumBucketsPerPartition
 
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Seed() uint64 {
-	return pb.seed
-}
-
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) NumKeys() uint64 {
-	return pb.numKeys
-}
-
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) TableSize() uint64 {
-	// Return the total estimated table size
-	return pb.tableSize
-}
-
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) NumPartitions() uint64 {
-	return pb.numPartitions
-}
-
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Partitioner() core.RangeBucketer {
-	return pb.partitioner
-}
-
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Offsets() []uint64 {
-	return pb.offsets
-}
-
-// Builders returns the slice of sub-builders (pointers).
-func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Builders() []*InternalMemoryBuilderSinglePHF[K, H, B] {
-	return pb.subBuilders
+// Hasher returns the hasher instance.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Hasher() H {
+	return pb.hasher
 }
 
 // buildFromHashes is needed for partitioned builds. Add to InternalMemoryBuilderSinglePHF.
@@ -382,76 +342,67 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) NumBucketsPerPartition()
 }
 
 // BuildSubPHFs executes the build process for each partition's sub-builder.
-// This belongs logically in Phase 6 but is defined here for structure.
+// Assumes partitionBuffers is populated internally.
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
-	partitionBuffers [][]core.Hash128,
-	config core.BuildConfig, // Pass original config for thread count etc.
+	config core.BuildConfig,
 ) (core.BuildTimings, error) {
 
 	util.Log(config.Verbose, "Building Sub-PHFs...")
-	subPHFConfig := config      // Copy config
+	if pb.partitionBuffers == nil {
+		return core.BuildTimings{}, fmt.Errorf("internal error: partition buffers are nil during BuildSubPHFs")
+	}
+
+	subPHFConfig := config // Copy config
 	subPHFConfig.Seed = pb.seed // Ensure sub-builders use the same main seed
 	subPHFConfig.NumBuckets = pb.numBucketsPerPartition
 	subPHFConfig.Verbose = false // Quieten sub-builders usually
 	subPHFConfig.NumThreads = 1  // Each sub-build runs sequentially within its thread/goroutine
 
-	var timings core.BuildTimings
-	// var totalMappingOrdering, totalSearching time.Duration
+	var accumulatedTimings core.BuildTimings // Used for sequential accumulation
+	maxMappingOrdering := time.Duration(0)   // Used for parallel max time
+	maxSearching := time.Duration(0)         // Used for parallel max time
+
 	numThreads := config.NumThreads
-	if numThreads <= 0 {
-		numThreads = 1
-	}
+	if numThreads <= 0 { numThreads = 1 }
+
 
 	if numThreads > 1 && pb.numPartitions >= uint64(numThreads) {
 		// Parallel build
 		var wg sync.WaitGroup
 		wg.Add(int(pb.numPartitions))
-		errChan := make(chan error, pb.numPartitions)                // Buffered channel for errors
-		timingChan := make(chan core.BuildTimings, pb.numPartitions) // Channel for timings
-
-		// Use a semaphore to limit concurrency if needed, or just spawn all
-		sem := make(chan struct{}, numThreads) // Limit to numThreads concurrent builds
+		// Use channels for results, including potential seed errors
+		errChan := make(chan error, pb.numPartitions)
+		timingChan := make(chan core.BuildTimings, pb.numPartitions)
+		sem := make(chan struct{}, numThreads) // Limit concurrency
 
 		for i := uint64(0); i < pb.numPartitions; i++ {
 			go func(partitionIdx uint64) {
-				sem <- struct{}{} // Acquire semaphore slot
+				sem <- struct{}{} // Acquire
 				defer wg.Done()
-				defer func() { <-sem }() // Release semaphore slot
+				defer func() { <-sem }() // Release
 
 				subBuilder := pb.subBuilders[partitionIdx]
-				hashes := partitionBuffers[partitionIdx]
+				hashes := pb.partitionBuffers[partitionIdx] // Use internal buffer
 
 				if len(hashes) == 0 {
-					// Handle empty partition - sub-builder remains empty? Or init defaults?
-					// Need to ensure sub-builder state is valid even if empty.
-					// Let's initialize essential fields.
+					// Initialize empty sub-builder state correctly
 					subBuilder.numKeys = 0
 					subBuilder.tableSize = 0
-					subBuilder.numBuckets = 0 // Or subPHFConfig.NumBuckets? Let's use 0.
+					subBuilder.numBuckets = 0
 					subBuilder.seed = subPHFConfig.Seed
-					// Ensure bucketer is initialized (even if not used)
 					var zeroBucketer B
 					subBuilder.bucketer = zeroBucketer
-					_ = subBuilder.bucketer.Init(0, 0, 0, 0) // Call init on zero value
-
-					timingChan <- core.BuildTimings{} // Send zero timings
+					_ = subBuilder.bucketer.Init(0, 0, 0, 0) // Call init
+					timingChan <- core.BuildTimings{}
+					errChan <- nil // No error for empty partition
 					return
 				}
 
-				// Pass the actual hashes for this partition
-				// The sub-builder's BuildFromKeys expects keys, but we have hashes.
-				// Need a BuildFromHashes method in the single builder.
-				// Let's add BuildFromHashes to InternalMemoryBuilderSinglePHF.
-
-				// --- Assuming BuildFromHashes exists ---
 				subTimings, err := subBuilder.buildFromHashes(hashes, subPHFConfig)
-				if err != nil {
-					errChan <- fmt.Errorf("partition %d build failed: %w", partitionIdx, err)
-					timingChan <- core.BuildTimings{} // Send zero timings on error
-					return
-				}
+				// Send results regardless of error
 				timingChan <- subTimings
-				errChan <- nil // Indicate success
+				errChan <- err // Send nil on success, error object on failure
+
 			}(i)
 		}
 
@@ -461,63 +412,51 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildSubPHFs(
 
 		// Collect results and check for errors
 		var firstError error
-		maxMappingOrdering := time.Duration(0)
-		maxSearching := time.Duration(0)
-
 		for err := range errChan {
 			if err != nil && firstError == nil {
-				firstError = err // Capture the first error encountered
+				// Capture the first error encountered (could be SeedRuntimeError)
+				firstError = err
 			}
 		}
 		if firstError != nil {
-			return timings, firstError // Return the first error
+			return core.BuildTimings{}, firstError // Propagate the error
 		}
 
 		for t := range timingChan {
-			// In parallel, we take the max time for each phase
-			if t.MappingOrderingMicroseconds > maxMappingOrdering {
-				maxMappingOrdering = t.MappingOrderingMicroseconds
-			}
-			if t.SearchingMicroseconds > maxSearching {
-				maxSearching = t.SearchingMicroseconds
-			}
+			if t.MappingOrderingMicroseconds > maxMappingOrdering { maxMappingOrdering = t.MappingOrderingMicroseconds }
+			if t.SearchingMicroseconds > maxSearching { maxSearching = t.SearchingMicroseconds }
 		}
-		timings.MappingOrderingMicroseconds = maxMappingOrdering
-		timings.SearchingMicroseconds = maxSearching
+		// Assign max timings for parallel execution
+		accumulatedTimings.MappingOrderingMicroseconds = maxMappingOrdering
+		accumulatedTimings.SearchingMicroseconds = maxSearching
 
 	} else {
 		// Sequential build
 		for i := uint64(0); i < pb.numPartitions; i++ {
 			subBuilder := pb.subBuilders[i]
-			hashes := partitionBuffers[i]
+			hashes := pb.partitionBuffers[i]
 
 			if len(hashes) == 0 {
-				// Handle empty partition
-				subBuilder.numKeys = 0
-				subBuilder.tableSize = 0
-				subBuilder.numBuckets = 0
-				subBuilder.seed = subPHFConfig.Seed
-				var zeroBucketer B
-				subBuilder.bucketer = zeroBucketer
-				_ = subBuilder.bucketer.Init(0, 0, 0, 0)
+				subBuilder.numKeys = 0; subBuilder.tableSize = 0; subBuilder.numBuckets = 0; subBuilder.seed = subPHFConfig.Seed
+				var zeroBucketer B; subBuilder.bucketer = zeroBucketer; _ = subBuilder.bucketer.Init(0,0,0,0)
 				continue
 			}
 
-			// --- Assuming BuildFromHashes exists ---
 			subTimings, err := subBuilder.buildFromHashes(hashes, subPHFConfig)
 			if err != nil {
-				return timings, fmt.Errorf("partition %d build failed: %w", i, err)
+				// If sequential, return error immediately
+				return accumulatedTimings, fmt.Errorf("partition %d build failed: %w", i, err)
 			}
 			// Accumulate timings sequentially
-			timings.MappingOrderingMicroseconds += subTimings.MappingOrderingMicroseconds
-			timings.SearchingMicroseconds += subTimings.SearchingMicroseconds
+			accumulatedTimings.MappingOrderingMicroseconds += subTimings.MappingOrderingMicroseconds
+			accumulatedTimings.SearchingMicroseconds += subTimings.SearchingMicroseconds
 		}
 	}
 
-	util.Log(config.Verbose, "Sub-PHF Mapping+Ordering Max/Sum: %v", timings.MappingOrderingMicroseconds)
-	util.Log(config.Verbose, "Sub-PHF Searching Max/Sum: %v", timings.SearchingMicroseconds)
+	util.Log(config.Verbose, "Sub-PHF Mapping+Ordering Max/Sum: %v", accumulatedTimings.MappingOrderingMicroseconds)
+	util.Log(config.Verbose, "Sub-PHF Searching Max/Sum: %v", accumulatedTimings.SearchingMicroseconds)
 
-	return timings, nil
+	return accumulatedTimings, nil
 }
 
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) AvgPartitionSize() uint64 {
