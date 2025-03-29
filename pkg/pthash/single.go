@@ -127,25 +127,24 @@ func (f *SinglePHF[K, H, B, E]) Lookup(key K) uint64 {
 		hashedPilot := core.DefaultHash64(pilot, f.seed)
 		p = core.FastModU64(hash.Second()^hashedPilot, f.m128, f.tableSize)
 	case core.SearchTypeAdd:
-		// Port C++ logic: fastmod::fastmod_u32(((hash64(hash.second() + s).mix()) >> 33) + pilot, m_M_64, m_table_size);
-		// s = fastmod::fastdiv_u32(pilot, m_M_64);
 		// Assumes tableSize fits in uint32 for fastmod32 operations
-		m64 := core.M32(f.m64) // Cast needed if stored as uint64
+		m64 := core.M32(f.m64) // Stored m64 is already uint64, this cast needed? No. M32 is uint64 alias.
 		d32 := uint32(f.tableSize)
-		s := core.FastDivU32(uint32(pilot), m64) // Assumes pilot fits uint32 for this step? C++ uses uint64 pilot. Needs check. Cast for now.
 
-		// Need hash64(uint64).mix() equivalent
+		// s = fastmod::fastdiv_u32(pilot, m_M_64);
+		// C++ passes uint64_t pilot to fastdiv_u32(uint32_t, uint64_t).
+		// Assuming implicit cast/truncation happens in C++ call based on signature.
+		s := core.FastDivU32(uint32(pilot), m64) // Keep the uint32 cast here based on C++ sig
+
 		valToMix := hash.Second() + uint64(s)
-		mixedHash := core.Mix64(valToMix) // Need Mix64 utility function
+		mixedHash := core.Mix64(valToMix)
 
-		// C++ uses >> 33 before adding pilot and modulo.
-		// Python reference might use (rem_hash + pilot) % table_size
-		// Let's follow C++:
+		// p = fastmod::fastmod_u32(((hash64(...).mix()) >> 33) + pilot, M, table_size);
 		term1 := mixedHash >> 33
-		term2 := uint32(pilot) // C++ adds full pilot before modulo
-		sum := term1 + uint64(term2)
+		// *** CORRECTION: Add the FULL uint64 pilot BEFORE casting to uint32 ***
+		sum := term1 + pilot // Add full pilot here
 
-		p = uint64(core.FastModU32(uint32(sum), m64, d32)) // Final result cast back to uint64
+		p = uint64(core.FastModU32(uint32(sum), m64, d32)) // Cast to uint32 ONLY for the final modulo operation
 	default:
 		panic(fmt.Sprintf("unknown search type: %v", f.searchType))
 	}

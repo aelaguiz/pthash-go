@@ -26,42 +26,52 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	logger.Init()
 	defer logger.Finalize(numNonEmptyBuckets) // Use numNonEmpty from merge phase
 
-	// Precompute hashed pilots cache
-	hashedPilotsCache := make([]uint64, searchCacheSize)
-	for i := range hashedPilotsCache {
-		hashedPilotsCache[i] = core.DefaultHash64(uint64(i), seed)
+	// Precompute hashed pilots cache (only needed for XOR)
+	var hashedPilotsCache []uint64
+	if config.Search == core.SearchTypeXOR {
+		hashedPilotsCache = make([]uint64, searchCacheSize)
+		for i := range hashedPilotsCache {
+			hashedPilotsCache[i] = core.DefaultHash64(uint64(i), seed)
+		}
 	}
-	// FastMod parameter for table size
+
+	// FastMod parameter(s) for table size
 	tableSize := core.MinimalTableSize(numKeys, config.Alpha, config.Search)
-	mTableSize := core.ComputeM64(tableSize)
+	mTableSize64 := core.ComputeM64(tableSize) // For XOR
+	mTableSize32 := core.ComputeM32(uint32(tableSize)) // For ADD
 
 	var err error
 	log.Printf("Search decision: NumThreads=%d, NumNonEmptyBuckets=%d, Required=%d",
 		config.NumThreads, numNonEmptyBuckets, uint64(config.NumThreads)*2)
-	if config.NumThreads > 1 && numNonEmptyBuckets >= uint64(config.NumThreads)*2 { // Add heuristic for parallelism benefit
-		log.Printf("Using PARALLEL search with %d threads", config.NumThreads)
-		if config.Search == core.SearchTypeXOR {
+
+	// --- Use appropriate search function based on config ---
+	isParallel := config.NumThreads > 1 && numNonEmptyBuckets >= uint64(config.NumThreads)*2
+
+	switch config.Search {
+	case core.SearchTypeXOR:
+		if isParallel {
+			log.Printf("Using PARALLEL search (XOR) with %d threads", config.NumThreads)
 			err = searchParallelXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
-				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize, tableSize)
-		} else if config.Search == core.SearchTypeAdd {
-			// err = searchParallelAdd(...) // TODO: Implement Additive Search
+				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize64, tableSize)
+		} else {
+			log.Printf("Using SEQUENTIAL search (XOR)")
+			err = searchSequentialXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
+				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize64, tableSize)
+		}
+	case core.SearchTypeAdd:
+		if isParallel {
+			log.Printf("Using PARALLEL search (ADD) with %d threads", config.NumThreads)
+			// err = searchParallelAdd(...) // TODO: Implement Additive Search Parallel
 			return fmt.Errorf("parallel additive search not implemented")
 		} else {
-			return fmt.Errorf("unknown search type: %v", config.Search)
+			log.Printf("Using SEQUENTIAL search (ADD)")
+			err = searchSequentialAdd(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
+				bucketsIt, taken, pilots, logger, mTableSize32, tableSize) // Pass m32
 		}
-	} else {
-		log.Printf("Using SEQUENTIAL search: threads=%d or buckets=%d < required=%d",
-			config.NumThreads, numNonEmptyBuckets, uint64(config.NumThreads)*2)
-		if config.Search == core.SearchTypeXOR {
-			err = searchSequentialXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
-				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize, tableSize)
-		} else if config.Search == core.SearchTypeAdd {
-			// err = searchSequentialAdd(...) // TODO: Implement Additive Search
-			return fmt.Errorf("sequential additive search not implemented")
-		} else {
-			return fmt.Errorf("unknown search type: %v", config.Search)
-		}
+	default:
+		return fmt.Errorf("unknown search type: %v", config.Search)
 	}
+
 	return err
 }
 
@@ -396,5 +406,97 @@ func searchParallelXOR(
 		// For now, we don't explicitly return SeedRuntimeError here, but it's a possibility.
 	}
 
+	return nil
+}
+// searchSequentialAdd finds pilots sequentially using Additive displacement.
+func searchSequentialAdd(
+	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
+	config *core.BuildConfig,
+	bucketsIt *bucketsIteratorT,
+	taken *core.BitVectorBuilder, // NOTE: Not concurrent safe
+	pilots PilotsBuffer,
+	logger *SearchLogger,
+	// No hashedPilotsCache needed for additive
+	// Needs m64 and tableSize for fastmod32
+	m64 core.M32, // Precomputed M for fastmod32
+	tableSize uint64, // Needed for d parameter
+) error {
+	positions := make([]uint64, 0, core.MaxBucketSize)
+	d32 := uint32(tableSize) // Precompute for modulo
+
+	processedBuckets := uint64(0)
+
+	for bucketsIt.HasNext() {
+		bucket := bucketsIt.Next()
+		bucketSize := bucket.Size()
+		if bucketSize == 0 { continue } // Should not happen
+		bucketID := bucket.ID()
+		payloads := bucket.Payloads() // These are hash.Second() values
+
+		foundPilot := false
+		for pilot := uint64(0); ; pilot++ { // Infinite loop until pilot found (or seed error)
+			// Safety check
+			if pilot >= maxPilotAttempts { // Use same constant as XOR
+				return fmt.Errorf("DEBUG: Exceeded max pilot attempts (%d) for bucket %d (ADD)", maxPilotAttempts, bucketID)
+			}
+
+			s := core.FastDivU32(uint32(pilot), m64) // Calculate s = pilot / tableSize (approx)
+
+			positions = positions[:0] // Clear slice
+			collisionFound := false
+
+			for _, pld := range payloads {
+				hashSecond := pld
+				// Calculate position: fastmod_u32(((mix(h2+s)) >> 33) + pilot, M, d)
+				valToMix := hashSecond + uint64(s)
+				mixedHash := core.Mix64(valToMix)
+				term1 := mixedHash >> 33
+				sum := term1 + pilot // Add full pilot
+				p := uint64(core.FastModU32(uint32(sum), m64, d32))
+
+				// Check collision with taken bits
+				if taken.Get(p) {
+					collisionFound = true
+					break
+				}
+				positions = append(positions, p)
+			}
+
+			if collisionFound {
+				continue // Try next pilot
+			}
+
+			// Check for in-bucket collisions
+			sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+			inBucketCollision := false
+			for i := 1; i < len(positions); i++ {
+				if positions[i] == positions[i-1] {
+					inBucketCollision = true
+					break
+				}
+			}
+			if inBucketCollision {
+				continue // Try next pilot
+			}
+
+			// Pilot found!
+			pilots.EmplaceBack(bucketID, pilot)
+			for _, p := range positions {
+				taken.Set(p) // Mark slots as taken
+			}
+			logger.Update(processedBuckets, bucketSize)
+			foundPilot = true
+			break // Move to next bucket
+		} // End pilot search loop
+
+		if !foundPilot {
+			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d (ADD)", bucketID)}
+		}
+		processedBuckets++
+	} // End bucket iteration
+
+	if processedBuckets != numNonEmptyBuckets {
+		util.Log(config.Verbose, "Warning (ADD): Processed %d buckets, expected %d non-empty", processedBuckets, numNonEmptyBuckets)
+	}
 	return nil
 }

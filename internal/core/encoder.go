@@ -565,14 +565,14 @@ func (d *D1Array) UnmarshalBinary(data []byte) error {
 
 // --- Placeholder for other encoders ---
 
-// EliasFano stores a monotone sequence compactly. Placeholder.
+// EliasFano stores a monotone sequence compactly.
 type EliasFano struct {
-	// Internal data structures for lower/upper bits, rank/select
-	numValues uint64
-	// Placeholder fields
-	lowerBits       *BitVector
-	upperBits       *BitVector
-	upperBitsSelect *D1Array // For select0 on upper bits
+	numValues       uint64
+	universe        uint64 // Max value + 1
+	numLowBits      uint8
+	lowerBits       *CompactVector // Stores lower l bits of each value
+	upperBits       *BitVector     // Unary codes of upper parts
+	upperBitsSelect *D1Array       // Rank/Select structure for upperBits
 }
 
 // DiffCompactEncoder for dense partitioned offsets. Placeholder.
@@ -583,33 +583,148 @@ const logPhiMinus1 = -0.48121182505960345 // Pre-computed log(phi-1) = log(1/phi
 
 // NewEliasFano creates an empty EliasFano encoder.
 func NewEliasFano() *EliasFano {
-	// Initialize? Or wait for Encode.
 	return &EliasFano{}
 }
 
-// Encode builds the Elias-Fano structure from a sorted slice.
+// Encode builds the Elias-Fano structure from a sorted slice of DISTINCT values.
+// Input values MUST be monotonically increasing and distinct.
 func (ef *EliasFano) Encode(sortedValues []uint64) error {
-	// TODO: Implement actual Elias-Fano encoding algorithm.
-	// 1. Determine parameters (l, number of upper bits).
-	// 2. Build lower bits bitvector.
-	// 3. Build upper bits bitvector (unary code of high parts).
-	// 4. Build rank/select structures (e.g., D1Array for select0).
-	ef.numValues = uint64(len(sortedValues))
-	return fmt.Errorf("EliasFano.Encode not implemented")
+	n := uint64(len(sortedValues))
+	ef.numValues = n
+
+	if n == 0 {
+		ef.universe = 0
+		ef.numLowBits = 0
+		ef.lowerBits = NewCompactVector(0, 0)
+		ef.upperBits = NewBitVector(0)
+		ef.upperBitsSelect = NewD1Array(ef.upperBits)
+		return nil
+	}
+
+	// Check monotonicity and find universe (max value + 1)
+	u := uint64(0)
+	if n > 0 {
+		u = sortedValues[n-1] + 1
+		for i := uint64(1); i < n; i++ {
+			if sortedValues[i] < sortedValues[i-1] { // Allow duplicates for now? C++ EF might. Let's require monotonic.
+				return fmt.Errorf("EliasFano.Encode input must be monotonically increasing (value[%d]=%d < value[%d]=%d)", i, sortedValues[i], i-1, sortedValues[i-1])
+			}
+			// if sortedValues[i] == sortedValues[i-1] {
+			// 	return fmt.Errorf("EliasFano.Encode input must contain distinct values (value[%d]=%d == value[%d]=%d)", i, sortedValues[i], i-1, sortedValues[i-1])
+			// }
+		}
+	}
+	ef.universe = u
+
+	// Calculate l = floor(log2(u/n)) or 0 if u/n is 0
+	l := uint8(0)
+	if n > 0 && u > n { // Avoid division by zero and log(<=1)
+		ratio := float64(u) / float64(n)
+		l = uint8(math.Floor(math.Log2(ratio)))
+	}
+	// Ensure l is within reasonable bounds (e.g., <= 64)
+	if l > 64 { l = 64 }
+	ef.numLowBits = l
+
+	// Estimate size for upper bits: n '1's + sum(v >> l) '0's
+	// Approx sum(v >> l) = sum(v) >> l ? Not quite.
+	// Safe upper bound: n * (u >> l) zeros + n ones
+	upperBitsSizeEstimate := uint64(0)
+	if u > 0 && l < 64 { // Avoid shift issues
+		upperBitsSizeEstimate = n + n*(u>>l)
+	} else {
+		upperBitsSizeEstimate = n // Just the '1' terminators if l >= 64 or u=0
+	}
+	// Add some buffer
+	upperBitsSizeEstimate += 100
+
+	lbBuilder := NewCompactVectorBuilder(n, l)
+	ubBuilder := NewBitVectorBuilder(upperBitsSizeEstimate)
+
+	lastHighPart := uint64(0)
+	mask := uint64(0)
+	if l < 64 {
+		mask = (uint64(1) << l) - 1
+	} else if l == 64 {
+		mask = ^uint64(0)
+	}
+
+	for i, v := range sortedValues {
+		low := uint64(0)
+		high := uint64(0)
+
+		if l < 64 {
+			low = v & mask
+			high = v >> l
+		} else { // l == 64
+			low = v
+			high = 0 // High part is always 0 if l=64
+		}
+
+		lbBuilder.Set(uint64(i), low)
+
+		// Add unary code for high part delta
+		delta := high - lastHighPart
+		for k := uint64(0); k < delta; k++ {
+			ubBuilder.PushBack(false) // 0
+		}
+		ubBuilder.PushBack(true) // 1 (terminator)
+		lastHighPart = high
+	}
+
+	ef.lowerBits = lbBuilder.Build()
+	ef.upperBits = ubBuilder.Build()
+	ef.upperBitsSelect = NewD1Array(ef.upperBits) // Build rank/select on upper bits
+
+	// Verify numSetBits matches n
+	if ef.upperBitsSelect.numSetBits != n {
+		return fmt.Errorf("internal EliasFano error: upperBitsSelect has %d set bits, expected %d", ef.upperBitsSelect.numSetBits, n)
+	}
+
+	return nil
 }
 
 // Access retrieves the value with rank `i` (0-based).
 func (ef *EliasFano) Access(rank uint64) uint64 {
 	if rank >= ef.numValues {
-		panic("EliasFano.Access: rank out of bounds")
+		panic(fmt.Sprintf("EliasFano.Access: rank %d out of bounds (%d)", rank, ef.numValues))
 	}
-	// TODO: Implement Elias-Fano access algorithm.
-	// 1. Use select0 on upperBits to find position range.
-	// 2. Calculate high part from rank and position.
+	if ef.numValues == 0 {
+		panic("EliasFano.Access: accessing empty structure")
+	}
+
+	// 1. Find position of (rank+1)-th '1' in upper bits -> gives end of unary code
+	selectRank := rank // Select uses 0-based rank
+	pos := ef.upperBitsSelect.Select(selectRank)
+
+	// 2. Find high part. Need position of rank-th '1' as well.
+	high := uint64(0)
+	if rank == 0 {
+		// High part is the number of zeros before the first '1', which is Select(0)
+		high = pos
+	} else {
+		prevPos := ef.upperBitsSelect.Select(rank - 1)
+		// High part is number of zeros between prevPos and pos
+		// Count = pos - (prevPos + 1)
+		high = pos - (prevPos + 1)
+	}
+
 	// 3. Read low part from lowerBits at 'rank'.
-	// 4. Combine high and low parts.
-	// fmt.Println("Warning: EliasFano.Access returning placeholder 0")
-	return 0 // Placeholder
+	low := uint64(0)
+	if ef.numLowBits > 0 {
+		low = ef.lowerBits.Access(rank)
+	}
+
+	// 4. Combine: (high << l) | low
+	val := low
+	if ef.numLowBits < 64 {
+		val |= (high << ef.numLowBits)
+	} else if high > 0 {
+		// Should not happen if values fit in uint64
+		panic("EliasFano decoding error: high part > 0 with l=64")
+	}
+
+	return val
 }
 
 // Size returns the number of values encoded.
@@ -622,26 +737,64 @@ func (ef *EliasFano) NumBits() uint64 {
 	lbBits := uint64(0)
 	ubBits := uint64(0)
 	selBits := uint64(0)
-	if ef.lowerBits != nil {
-		lbBits = ef.lowerBits.NumBitsStored()
-	}
-	if ef.upperBits != nil {
-		ubBits = ef.upperBits.NumBitsStored()
-	}
-	if ef.upperBitsSelect != nil {
-		selBits = ef.upperBitsSelect.NumBits()
-	}
-	return lbBits + ubBits + selBits + 8*8 // + size field
+	if ef.lowerBits != nil { lbBits = ef.lowerBits.NumBitsStored() }
+	if ef.upperBits != nil { ubBits = ef.upperBits.NumBitsStored() }
+	if ef.upperBitsSelect != nil { selBits = ef.upperBitsSelect.NumBits() }
+	return 8*8 + 8*8 + 8 + lbBits + ubBits + selBits // numValues, universe, numLowBits + data
 }
 
-// MarshalBinary placeholder
+// MarshalBinary implements encoding.BinaryMarshaler.
 func (ef *EliasFano) MarshalBinary() ([]byte, error) {
-	// TODO: Serialize ef.numValues, ef.lowerBits, ef.upperBits, ef.upperBitsSelect
-	return nil, fmt.Errorf("EliasFano.MarshalBinary not implemented")
+    // Serialize numValues, universe, numLowBits, lowerBits, upperBits, upperBitsSelect
+		// Placeholder implementation
+		lbData, err := serial.TryMarshal(ef.lowerBits)
+		if err != nil { return nil, err}
+		selData, err := serial.TryMarshal(ef.upperBitsSelect) // Marshals BV + Ranks
+		if err != nil { return nil, err}
+
+		totalSize := 8 + 8 + 1 + 8 + len(lbData) + 8 + len(selData)
+		buf := make([]byte, totalSize)
+		offset := 0
+		binary.LittleEndian.PutUint64(buf[offset:], ef.numValues); offset += 8
+		binary.LittleEndian.PutUint64(buf[offset:], ef.universe); offset += 8
+		buf[offset] = ef.numLowBits; offset += 1
+
+		binary.LittleEndian.PutUint64(buf[offset:], uint64(len(lbData))); offset += 8
+		copy(buf[offset:], lbData); offset += len(lbData)
+
+		binary.LittleEndian.PutUint64(buf[offset:], uint64(len(selData))); offset += 8
+		copy(buf[offset:], selData); offset += len(selData)
+
+		if offset != totalSize { return nil, fmt.Errorf("EF marshal size mismatch") }
+    return buf, nil
 }
 
-// UnmarshalBinary placeholder
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (ef *EliasFano) UnmarshalBinary(data []byte) error {
-	// TODO: Deserialize fields
-	return fmt.Errorf("EliasFano.UnmarshalBinary not implemented")
+    // Deserialize fields
+		if len(data) < 8+8+1 { return io.ErrUnexpectedEOF }
+		offset := 0
+		ef.numValues = binary.LittleEndian.Uint64(data[offset:]); offset += 8
+		ef.universe = binary.LittleEndian.Uint64(data[offset:]); offset += 8
+		ef.numLowBits = data[offset]; offset += 1
+
+		if offset + 8 > len(data) { return io.ErrUnexpectedEOF }
+		lbLen := binary.LittleEndian.Uint64(data[offset:]); offset += 8
+		if offset + int(lbLen) > len(data) { return io.ErrUnexpectedEOF }
+		ef.lowerBits = NewCompactVector(0,0) // Create empty before unmarshal
+		err := serial.TryUnmarshal(ef.lowerBits, data[offset:offset+int(lbLen)])
+		if err != nil { return err }
+		offset += int(lbLen)
+
+		if offset + 8 > len(data) { return io.ErrUnexpectedEOF }
+		selLen := binary.LittleEndian.Uint64(data[offset:]); offset += 8
+		if offset + int(selLen) > len(data) { return io.ErrUnexpectedEOF }
+		ef.upperBitsSelect = &D1Array{} // Create empty before unmarshal
+		err = serial.TryUnmarshal(ef.upperBitsSelect, data[offset:offset+int(selLen)])
+		if err != nil { return err }
+		ef.upperBits = ef.upperBitsSelect.bv // Link upperBitsSelect's bv
+		offset += int(selLen)
+
+		if offset != len(data) { return fmt.Errorf("extra data after EF unmarshal") }
+    return nil
 }
