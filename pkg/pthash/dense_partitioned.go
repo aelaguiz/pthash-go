@@ -1,11 +1,16 @@
 package pthash
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
+	"math"
 	"pthashgo/internal/builder"
 	"pthashgo/internal/core"
+	"pthashgo/internal/serial" // Use centralized helpers
 	"pthashgo/internal/util"
 	"time"
+	"unsafe"
 )
 
 // DensePartitionedPHF implements the densely partitioned PHF (PHOBIC).
