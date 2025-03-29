@@ -33,9 +33,8 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 		allocSize = numKeys + 10
 	}
 	if allocSize == 0 { // Handle case where numKeys is very small
-	    allocSize = numKeys
+		allocSize = numKeys
 	}
-
 
 	keys := make([]uint64, allocSize)
 	Log(true, "Generating %d random numbers (target %d distinct)...", allocSize, numKeys)
@@ -84,37 +83,36 @@ func DistinctUints64(numKeys uint64, seed uint64) []uint64 {
 			lastVal = keys[uniqueCount-1]
 		}
 		for uint64(currentIdx) < numKeys {
-		    lastVal++ // Note: Potential for overflow if lastVal was MaxUint64
-		    // Very basic check to avoid immediate duplicate of the very last element if gaps failed
-		    if uniqueCount > 0 && lastVal == keys[uniqueCount-1] {
-		        lastVal++
-		    }
+			lastVal++ // Note: Potential for overflow if lastVal was MaxUint64
+			// Very basic check to avoid immediate duplicate of the very last element if gaps failed
+			if uniqueCount > 0 && lastVal == keys[uniqueCount-1] {
+				lastVal++
+			}
 			keys[currentIdx] = lastVal
 			currentIdx++
 		}
 		// We might have duplicates if we added sequentially, re-unique and trim
 		sort.Slice(keys[:currentIdx], func(i, j int) bool { return keys[i] < keys[j] })
 		finalUniqueCount := 0
-        if currentIdx > 0 {
-            finalUniqueCount = 1
-            for i := 1; i < currentIdx; i++ {
-                if keys[i] != keys[i-1] {
-                    keys[finalUniqueCount] = keys[i]
-                    finalUniqueCount++
-                }
-            }
-        }
-
-		if uint64(finalUniqueCount) < numKeys {
-		    // This should be extremely rare with uint64 unless numKeys is near 2^64
-		    log.Printf("ERROR: Could not generate enough distinct keys after filling gaps. Required: %d, Got: %d", numKeys, finalUniqueCount)
-		    // Decide how to handle: return error, panic, or return fewer keys?
-		    // For now, trim to what we have.
-		    keys = keys[:finalUniqueCount]
-		} else {
-		    keys = keys[:numKeys] // Trim precisely to numKeys
+		if currentIdx > 0 {
+			finalUniqueCount = 1
+			for i := 1; i < currentIdx; i++ {
+				if keys[i] != keys[i-1] {
+					keys[finalUniqueCount] = keys[i]
+					finalUniqueCount++
+				}
+			}
 		}
 
+		if uint64(finalUniqueCount) < numKeys {
+			// This should be extremely rare with uint64 unless numKeys is near 2^64
+			log.Printf("ERROR: Could not generate enough distinct keys after filling gaps. Required: %d, Got: %d", numKeys, finalUniqueCount)
+			// Decide how to handle: return error, panic, or return fewer keys?
+			// For now, trim to what we have.
+			keys = keys[:finalUniqueCount]
+		} else {
+			keys = keys[:numKeys] // Trim precisely to numKeys
+		}
 
 	} else {
 		// Had enough or more unique keys initially
