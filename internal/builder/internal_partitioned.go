@@ -25,12 +25,109 @@ type InternalMemoryBuilderPartitionedPHF[K any, H core.Hasher[K], B core.Buckete
 
 	// Results of the build process (passed to PartitionedPHF.Build)
 	offsets                []uint64                                   // Start offset for each partition's output range
+	rawPartitionOffsets    []uint64                                   // Raw offsets (needed by DiffEncoder)
 	subBuilders            []*InternalMemoryBuilderSinglePHF[K, H, B] // Builders for each partition's sub-PHF
 	avgPartSize            uint64                                     // Calculated avg partition size
 	numBucketsPerPartition uint64                                     // Calculated for sub-builders
+	freeSlots              []uint64                                   // Free slots for minimal+dense mode
 
 	// Timings accumulated during the build process
 	timings core.BuildTimings
+}
+
+// InterleavingPilotsIterator provides pilots in interleaved order.
+// This implements the PilotIterator interface for Dense Encoders.
+type InterleavingPilotsIterator[K any, H core.Hasher[K], B core.Bucketer] struct {
+	builders      []*InternalMemoryBuilderSinglePHF[K, H, B]
+	numPartitions uint64
+	numBuckets    uint64
+	currBucket    uint64
+	currPart      uint64
+}
+
+// NewInterleavingPilotsIterator creates an iterator that returns pilots in interleaved order.
+func NewInterleavingPilotsIterator[K any, H core.Hasher[K], B core.Bucketer](pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) *InterleavingPilotsIterator[K,H,B] {
+	numBuckets := uint64(0)
+	if len(pb.Builders()) > 0 && pb.Builders()[0] != nil {
+		// Assume all sub-builders were configured with the same number of buckets
+		numBuckets = pb.Builders()[0].NumBuckets()
+	}
+	return &InterleavingPilotsIterator[K,H,B] {
+		builders:      pb.Builders(),
+		numPartitions: pb.NumPartitions(),
+		numBuckets:    numBuckets,
+		currBucket:    0,
+		currPart:      0,
+	}
+}
+
+// HasNext returns true if there are more pilots to iterate.
+func (it *InterleavingPilotsIterator[K,H,B]) HasNext() bool {
+	return it.currBucket < it.numBuckets
+}
+
+// Next returns the next pilot in interleaved order.
+func (it *InterleavingPilotsIterator[K,H,B]) Next() uint64 {
+	if !it.HasNext() {
+		panic("InterleavingPilotsIterator.Next called after end")
+	}
+	// Get pilot from current partition's builder for current bucket
+	pilot := uint64(0)
+	if it.builders[it.currPart] != nil && it.currBucket < uint64(len(it.builders[it.currPart].Pilots())) {
+		pilot = it.builders[it.currPart].Pilots()[it.currBucket]
+	} else {
+		// Handle case where sub-builder might be nil or pilots slice smaller? Should ideally not happen.
+		// Return 0 for safety.
+	}
+
+	// Advance partition, wrap around to next bucket if needed
+	it.currPart++
+	if it.currPart == it.numPartitions {
+		it.currPart = 0
+		it.currBucket++
+	}
+	return pilot
+}
+
+// Helper struct to view 'taken' status across partitions
+type partitionedTakenView[K any, H core.Hasher[K], B core.Bucketer] struct {
+	builders []*InternalMemoryBuilderSinglePHF[K, H, B]
+	// Precompute offsets and sizes? Or look up dynamically? Dynamic for simplicity.
+}
+
+// newPartitionedTakenView creates a view of taken bits across all partitions.
+func newPartitionedTakenView[K any, H core.Hasher[K], B core.Bucketer](builders []*InternalMemoryBuilderSinglePHF[K, H, B]) *partitionedTakenView[K,H,B] {
+	return &partitionedTakenView[K,H,B]{builders: builders}
+}
+
+// Get returns true if the bit at position pos is set in any partition.
+func (ptv *partitionedTakenView[K,H,B]) Get(pos uint64) bool {
+	// Find which sub-builder 'pos' falls into. Requires knowing sub-table sizes.
+	currentOffset := uint64(0)
+	for _, subBuilder := range ptv.builders {
+		subTableSize := subBuilder.TableSize()
+		if pos < currentOffset + subTableSize {
+			// Found the partition
+			subPos := pos - currentOffset
+			if subBuilder.Taken() == nil { // Handle nil taken vector (e.g., empty partition)
+				return false
+			}
+			return subBuilder.Taken().Get(subPos)
+		}
+		currentOffset += subTableSize
+	}
+	// Position is out of bounds of all partitions
+	// This might happen if fillFreeSlots calls Get(>= tableSize) - should return false.
+	return false
+}
+
+// Size returns the total size of the taken view.
+func (ptv *partitionedTakenView[K,H,B]) Size() uint64 {
+	totalSize := uint64(0)
+	for _, subBuilder := range ptv.builders {
+		totalSize += subBuilder.TableSize()
+	}
+	return totalSize
 }
 
 // NewInternalMemoryBuilderPartitionedPHF creates a new partitioned builder.
@@ -121,6 +218,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 	// --- Calculate Offsets and Initialize Sub-Builders ---
 	offsetStart := time.Now()
 	pb.offsets = make([]uint64, pb.numPartitions+1)
+	pb.rawPartitionOffsets = make([]uint64, pb.numPartitions+1) // Store raw offsets for dense mode
 	pb.subBuilders = make([]*InternalMemoryBuilderSinglePHF[K, H, B], pb.numPartitions)
 	pb.tableSize = 0 // Total size across all partitions
 	pb.numBucketsPerPartition = core.ComputeNumBuckets(avgPartitionSize, config.Lambda)
@@ -135,7 +233,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 			subTableSize = core.MinimalTableSize(partitionSize, config.Alpha, config.Search)
 		}
 		pb.tableSize += subTableSize
-		pb.offsets[i] = cumulativeOffset
+		pb.rawPartitionOffsets[i] = cumulativeOffset // Store raw cumulative offset
 
 		offsetIncrement := uint64(0)
 		if config.DensePartitioning {
@@ -165,7 +263,8 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 
 		pb.subBuilders[i] = NewInternalMemoryBuilderSinglePHF[K, H, B](pb.hasher, subBucketer)
 	}
-	pb.offsets[pb.numPartitions] = cumulativeOffset
+	pb.rawPartitionOffsets[pb.numPartitions] = cumulativeOffset // Final raw offset
+	pb.offsets = pb.rawPartitionOffsets // For non-dense, offsets are the raw ones. Dense will overwrite later.
 	// Offset calculation is part of partitioning timing? Or separate setup time? Let's include in partitioning.
 	pb.timings.PartitioningMicroseconds += time.Since(offsetStart)
 
@@ -183,6 +282,20 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 	pb.timings.MappingOrderingMicroseconds = subBuildTimings.MappingOrderingMicroseconds
 	pb.timings.SearchingMicroseconds = subBuildTimings.SearchingMicroseconds
 	// Encoding time happens when the final PHF calls Build, not here.
+
+	// --- Fill Free Slots (Only for Dense + Minimal) ---
+	// C++ stores this in the partitioned builder for dense mode.
+	if config.Minimal && config.DensePartitioning {
+		freeSlotStart := time.Now()
+		pb.freeSlots = make([]uint64, 0, pb.tableSize-pb.numKeys) // Estimate capacity
+		// Need a way to logically view all 'taken' bits across sub-builders
+		// Create a 'taken' view/iterator on the fly?
+		takenView := newPartitionedTakenView[K, H, B](pb.subBuilders)
+		fillFreeSlots(takenView, pb.numKeys, &pb.freeSlots, pb.tableSize)
+		pb.timings.SearchingMicroseconds += time.Since(freeSlotStart) // Add to search time
+	} else {
+		pb.freeSlots = nil
+	}
 
 	// Release partition buffers memory after sub-builds are done
 	pb.partitionBuffers = nil
@@ -535,4 +648,14 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Builders() []*InternalMe
 // Offsets returns the array of offsets.
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) Offsets() []uint64 {
 	return pb.offsets
+}
+
+// RawPartitionOffsets returns the raw offsets before diff encoding.
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) RawPartitionOffsets() []uint64 {
+	return pb.rawPartitionOffsets
+}
+
+// FreeSlots returns the free slots array (for dense minimal).
+func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) FreeSlots() []uint64 {
+	return pb.freeSlots
 }
