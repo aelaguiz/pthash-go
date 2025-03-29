@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"reflect"
 
 	"pthashgo/internal/serial"
 )
