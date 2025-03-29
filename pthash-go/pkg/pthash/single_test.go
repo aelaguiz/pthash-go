@@ -118,7 +118,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								config.Lambda = lambda
 								config.Minimal = minimal
 								config.Search = searchType
-								config.Verbose = false // Keep tests quiet unless debugging
+								config.Verbose = true                // Keep tests quiet unless debugging
 								config.NumThreads = runtime.NumCPU() // Use all available CPUs
 								// Use a fixed seed for reproducibility within a test run
 								// config.Seed = uint64(rand.Int63()) // Use random later
