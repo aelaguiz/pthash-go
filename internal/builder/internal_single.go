@@ -52,6 +52,11 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) TableSize() uint64 {
 	return b.tableSize
 }
 
+// NumBuckets returns the number of buckets.
+func (b *InternalMemoryBuilderSinglePHF[K, H, B]) NumBuckets() uint64 {
+	return b.numBuckets
+}
+
 // Bucketer returns the bucketer instance.
 func (b *InternalMemoryBuilderSinglePHF[K, H, B]) Bucketer() B {
 	return b.bucketer
