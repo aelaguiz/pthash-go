@@ -10,7 +10,7 @@ import (
 
 	"pthashgo/internal/builder"
 	"pthashgo/internal/core"
-	"pthashgo/internal/serial"
+	"pthashgo/internal/serial" // Use centralized helpers
 )
 
 // SinglePHF implements the non-partitioned PTHash function.
@@ -195,60 +195,55 @@ func (f *SinglePHF[K, H, B, E]) NumBits() uint64 {
 	return f.NumBitsForPilots() + f.NumBitsForMapper()
 }
 
-// --- Serialization (Basic Example using encoding.BinaryMarshaler/Unmarshaler) ---
+// --- Serialization (Refined) ---
 
 const singlePHFMagic = "SPHF" // Magic identifier for file type
 
 // MarshalBinary implements encoding.BinaryMarshaler.
 func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
-	// 1. Calculate total size needed
-	bucketerData, err := tryMarshal(f.bucketer)
+	// 1. Marshal components first
+	bucketerData, err := serial.TryMarshal(f.bucketer) // Use serial.TryMarshal
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal bucketer: %w", err)
 	}
-	pilotsData, err := tryMarshal(f.pilots)
+	pilotsData, err := serial.TryMarshal(f.pilots) // Use serial.TryMarshal
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal pilots: %w", err)
 	}
 	freeSlotsData := []byte{}
 	hasFreeSlots := f.freeSlots != nil
 	if hasFreeSlots {
-		freeSlotsData, err = tryMarshal(f.freeSlots)
+		freeSlotsData, err = serial.TryMarshal(f.freeSlots) // Use serial.TryMarshal
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal free slots: %w", err)
 		}
 	}
 
-	// Size: magic(4) + version(1) + isMinimal(1) + searchType(1) + reserved(1)
-	//       + seed(8) + numKeys(8) + tableSize(8) + m64(8) + m128(16)
-	//       + bucketerLen(8) + bucketerData
-	//       + pilotsLen(8) + pilotsData
-	//       + hasFreeSlots(1) + freeSlotsLen(8) + freeSlotsData
-	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 16
-	totalSize := headerSize + 8 + len(bucketerData) + 8 + len(pilotsData) + 1 + 8 + len(freeSlotsData)
+	// 2. Calculate total size
+	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 16 // magic, version, flags, reserved, core params
+	totalSize := headerSize + 8 + len(bucketerData) + 8 + len(pilotsData) + 8 + len(freeSlotsData) // len + data for components
 	buf := make([]byte, totalSize)
 	offset := 0
 
-	// Magic & Versioning
+	// 3. Write Header
 	copy(buf[offset:offset+4], []byte(singlePHFMagic))
 	offset += 4
 	buf[offset] = 1 // Version
 	offset += 1
-	// Flags
 	flags := byte(0)
 	if f.isMinimal {
 		flags |= 1
 	}
 	flags |= (byte(f.searchType) << 1) // Assume searchType fits in a few bits
-	if hasFreeSlots {
-		flags |= (1 << 3)
-	}
+	// Removed hasFreeSlots from flags, rely on length later
 	buf[offset] = flags
 	offset += 1
-	buf[offset] = 0 // Reserved
+	buf[offset] = 0 // Reserved byte 1
+	offset += 1
+	buf[offset] = 0 // Reserved byte 2
 	offset += 1
 
-	// Core Params
+	// 4. Write Core Params
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.seed)
 	offset += 8
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.numKeys)
@@ -262,30 +257,23 @@ func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.m128[1]) // High
 	offset += 8
 
-	// Bucketer
+	// 5. Write Bucketer
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(len(bucketerData)))
 	offset += 8
 	copy(buf[offset:offset+len(bucketerData)], bucketerData)
 	offset += len(bucketerData)
 
-	// Pilots
+	// 6. Write Pilots
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(len(pilotsData)))
 	offset += 8
 	copy(buf[offset:offset+len(pilotsData)], pilotsData)
 	offset += len(pilotsData)
 
-	// Free Slots (conditional)
-	buf[offset] = 0
-	if hasFreeSlots {
-		buf[offset] = 1
-	}
-	offset += 1
+	// 7. Write Free Slots
 	binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(len(freeSlotsData)))
 	offset += 8
-	if hasFreeSlots {
-		copy(buf[offset:offset+len(freeSlotsData)], freeSlotsData)
-		offset += len(freeSlotsData)
-	}
+	copy(buf[offset:offset+len(freeSlotsData)], freeSlotsData)
+	offset += len(freeSlotsData)
 
 	if offset != totalSize {
 		return nil, fmt.Errorf("internal marshal error: offset %d != totalSize %d", offset, totalSize)
@@ -294,9 +282,6 @@ func (f *SinglePHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
-// WARNING: Generic types B and E cannot be reconstructed from bytes alone.
-// The caller needs to know the types B and E when calling UnmarshalBinary
-// on an empty SinglePHF instance created with NewSinglePHF<...>(...).
 func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 16
 	if len(data) < headerSize {
@@ -304,7 +289,7 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	}
 	offset := 0
 
-	// Magic & Version
+	// 1. Read Header
 	if string(data[offset:offset+4]) != singlePHFMagic {
 		return fmt.Errorf("invalid magic identifier")
 	}
@@ -314,17 +299,12 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("unsupported version: %d", version)
 	}
 	offset += 1
-
-	// Flags
 	flags := data[offset]
-	offset += 1
 	f.isMinimal = (flags & 1) != 0
 	f.searchType = core.SearchType((flags >> 1) & 3) // Extract search type bits
-	hasFreeSlots := (flags & (1 << 3)) != 0
-	_ = data[offset] // Reserved byte
-	offset += 1
+	offset += 1 + 1 + 1 // flags + reserved
 
-	// Core Params
+	// 2. Read Core Params
 	f.seed = binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
 	f.numKeys = binary.LittleEndian.Uint64(data[offset : offset+8])
@@ -338,81 +318,52 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	f.m128[1] = binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8 // High
 
-	// Bucketer
-	if offset+8 > len(data) {
-		return io.ErrUnexpectedEOF
-	}
+	// 3. Read Bucketer
+	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
 	bucketerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if offset+int(bucketerLen) > len(data) {
-		return io.ErrUnexpectedEOF
-	}
-	err := tryUnmarshal(&f.bucketer, data[offset:offset+int(bucketerLen)]) // Unmarshal into existing instance
+	if uint64(offset)+bucketerLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	// Unmarshal into the existing f.bucketer (assuming it's addressable or pointer)
+	err := serial.TryUnmarshal(&f.bucketer, data[offset:offset+int(bucketerLen)])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal bucketer: %w", err)
 	}
 	offset += int(bucketerLen)
 
-	// Pilots
-	if offset+8 > len(data) {
-		return io.ErrUnexpectedEOF
-	}
+	// 4. Read Pilots
+	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
 	pilotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if offset+int(pilotsLen) > len(data) {
-		return io.ErrUnexpectedEOF
-	}
-	err = tryUnmarshal(&f.pilots, data[offset:offset+int(pilotsLen)]) // Unmarshal into existing instance
+	if uint64(offset)+pilotsLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	err = serial.TryUnmarshal(&f.pilots, data[offset:offset+int(pilotsLen)])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal pilots: %w", err)
 	}
 	offset += int(pilotsLen)
 
-	// Free Slots (conditional)
-	if offset+1+8 > len(data) {
-		return io.ErrUnexpectedEOF
-	}
-	hasFreeSlotsRead := data[offset] == 1
-	offset += 1
-	if hasFreeSlotsRead != hasFreeSlots {
-		return fmt.Errorf("mismatch in hasFreeSlots flag")
-	}
+	// 5. Read Free Slots
+	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
 	freeSlotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if offset+int(freeSlotsLen) > len(data) {
-		return io.ErrUnexpectedEOF
-	}
-	if hasFreeSlots {
+	if uint64(offset)+freeSlotsLen > uint64(len(data)) { return io.ErrUnexpectedEOF }
+	if freeSlotsLen > 0 {
 		f.freeSlots = core.NewEliasFano() // Create instance before unmarshaling
-		err = tryUnmarshal(f.freeSlots, data[offset:offset+int(freeSlotsLen)])
+		err = serial.TryUnmarshal(f.freeSlots, data[offset:offset+int(freeSlotsLen)])
 		if err != nil {
+			f.freeSlots = nil // Ensure nil on error
 			return fmt.Errorf("failed to unmarshal free slots: %w", err)
 		}
 	} else {
-		f.freeSlots = nil
+		f.freeSlots = nil // Explicitly set nil if length is 0
 	}
 	offset += int(freeSlotsLen)
 
+
 	if offset != len(data) {
-		return fmt.Errorf("extra data detected after unmarshaling")
+		return fmt.Errorf("extra data detected after unmarshaling (%d bytes remain)", len(data)-offset)
 	}
 	return nil
 }
 
-// tryMarshal attempts to marshal an object if it implements BinaryMarshaler.
-func tryMarshal(v interface{}) ([]byte, error) {
-	if marshaler, ok := v.(encoding.BinaryMarshaler); ok {
-		return marshaler.MarshalBinary()
-	}
-	// If not implemented, fallback to serial implementation
-	return serial.TryMarshal(v)
-}
-
-// tryUnmarshal attempts to unmarshal data into a pointer if it implements BinaryUnmarshaler.
-// v must be a pointer to the target object (e.g., &f.bucketer).
-func tryUnmarshal(v interface{}, data []byte) error {
-	if unmarshaler, ok := v.(encoding.BinaryUnmarshaler); ok {
-		return unmarshaler.UnmarshalBinary(data)
-	}
-	return serial.TryUnmarshal(v, data)
-}
+// --- REMOVED tryMarshal/tryUnmarshal helpers ---
+// Use centralized versions from internal/serial
