@@ -17,9 +17,10 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	bucketsIt *bucketsIteratorT, // Iterator providing core.BucketT
 	taken *core.BitVectorBuilder, // Builder to mark taken slots
 	pilots PilotsBuffer, // Interface to store results
+	bucketer B, // Pass the actual bucketer instance
 ) error {
 
-	logger := NewSearchLogger[B](numKeys, numBuckets, B{}, config.Verbose) // Pass zero value of B for type info if needed
+	logger := NewSearchLogger[B](numKeys, numBuckets, bucketer, config.Verbose)
 	logger.Init()
 	defer logger.Finalize(numNonEmptyBuckets) // Use numNonEmpty from merge phase
 
@@ -29,13 +30,14 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 		hashedPilotsCache[i] = core.DefaultHash64(uint64(i), seed)
 	}
 	// FastMod parameter for table size
-	mTableSize := core.ComputeM64(config.MinimalTableSize(numKeys)) // Use minimal table size from config
+	tableSize := core.MinimalTableSize(numKeys, config.Alpha, config.Search)
+	mTableSize := core.ComputeM64(tableSize)
 
 	var err error
 	if config.NumThreads > 1 && numNonEmptyBuckets >= uint64(config.NumThreads)*2 { // Add heuristic for parallelism benefit
 		if config.Search == core.SearchTypeXOR {
 			err = searchParallelXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
-				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize)
+				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize, tableSize)
 		} else if config.Search == core.SearchTypeAdd {
 			// err = searchParallelAdd(...) // TODO: Implement Additive Search
 			return fmt.Errorf("parallel additive search not implemented")
@@ -45,7 +47,7 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	} else {
 		if config.Search == core.SearchTypeXOR {
 			err = searchSequentialXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
-				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize)
+				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize, tableSize)
 		} else if config.Search == core.SearchTypeAdd {
 			// err = searchSequentialAdd(...) // TODO: Implement Additive Search
 			return fmt.Errorf("sequential additive search not implemented")
@@ -66,8 +68,8 @@ func searchSequentialXOR(
 	logger *SearchLogger,
 	hashedPilotsCache []uint64,
 	mTableSize core.M64,
+	tableSize uint64,
 ) error {
-	tableSize := config.MinimalTableSize(numKeys)
 	positions := make([]uint64, 0, core.MaxBucketSize) // Preallocate for max possible size
 
 	processedBuckets := uint64(0)
@@ -164,8 +166,8 @@ func searchParallelXOR(
 	logger *SearchLogger,
 	hashedPilotsCache []uint64,
 	mTableSize core.M64,
+	tableSize uint64,
 ) error {
-	tableSize := config.MinimalTableSize(numKeys)
 	numThreads := config.NumThreads
 
 	// Need concurrent-safe access to taken bits and pilots buffer.
@@ -315,7 +317,7 @@ func searchParallelXOR(
 				if commitOk {
 					// Commit phase: Mark bits and store pilot
 					for _, p := range positions {
-						taken.Set(p)
+						takenSet(p) // Use the thread-safe wrapper
 					}
 					takenMu.Unlock() // Unlock after modifying taken
 
@@ -359,47 +361,4 @@ func searchParallelXOR(
 	return nil
 }
 
-// Helper for search function to get minimal table size from config
-func (c *core.BuildConfig) MinimalTableSize(numKeys uint64) uint64 {
-	tableSize := uint64(float64(numKeys) / c.Alpha)
-	if c.Search == core.SearchTypeXOR && (tableSize&(tableSize-1)) == 0 && tableSize > 0 {
-		tableSize++
-	}
-	return tableSize
-}
 
-// Add Get/Set methods to BitVectorBuilder for sequential search
-// These are NOT thread-safe.
-func (b *core.BitVectorBuilder) Get(pos uint64) bool {
-	if pos >= b.size {
-		// Reading beyond current size conceptually returns 0/false
-		return false
-	}
-	wordIndex := pos / 64
-	bitIndex := pos % 64
-	if wordIndex >= uint64(len(b.words)) {
-		// Accessing word that hasn't been allocated yet
-		return false
-	}
-	return (b.words[wordIndex] & (1 << bitIndex)) != 0
-}
-
-func (b *core.BitVectorBuilder) Set(pos uint64) {
-	if pos >= b.capacity {
-		b.grow(pos - b.size + 1) // Grow enough to include pos
-	}
-	wordIndex := pos / 64
-	bitIndex := pos % 64
-	if wordIndex >= uint64(len(b.words)) { // Ensure word exists after potential grow
-		neededLen := wordIndex + 1
-		if neededLen > uint64(cap(b.words)) {
-			// Should not happen if grow worked correctly
-			panic("Set after grow failed")
-		}
-		b.words = b.words[:neededLen]
-	}
-	b.words[wordIndex] |= (1 << bitIndex)
-	if pos >= b.size { // Update size if we set a bit beyond the current end
-		b.size = pos + 1
-	}
-}

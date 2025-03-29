@@ -174,7 +174,7 @@ func Mix64(h uint64) uint64 {
 }
 
 // CheckHashCollisionProbability performs the check from C++.
-func CheckHashCollisionProbability[H Hasher[any]](numKeys uint64) error {
+func CheckHashCollisionProbability[K any, H Hasher[K]](numKeys uint64) error {
 	// This check relies on knowing the hash output size.
 	// Our interface mandates Hash128, so the 64-bit check isn't directly applicable
 	// unless we introduce a way to know the *effective* size used or parameterize it.

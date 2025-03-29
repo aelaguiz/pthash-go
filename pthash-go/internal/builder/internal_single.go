@@ -106,7 +106,7 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) buildFromKeysInternal(keys []K
 	b.config = config // Store config
 
 	// Check hash collision probability
-	err := core.CheckHashCollisionProbability[H](numKeys)
+	err := core.CheckHashCollisionProbability[K, H](numKeys)
 	if err != nil {
 		return core.BuildTimings{}, err
 	}
@@ -189,7 +189,7 @@ func (b *InternalMemoryBuilderSinglePHF[K, H, B]) buildFromKeysInternal(keys []K
 	// Run the search function (from search.go)
 	err = Search[B]( // Pass Bucketer type explicitly for Search Logger estimate
 		b.numKeys, b.numBuckets, numNonEmpty, b.seed, &config,
-		bucketsIter, takenBuilder, pilotsWrapper,
+		bucketsIter, takenBuilder, pilotsWrapper, b.bucketer,
 	)
 	if err != nil {
 		return core.BuildTimings{}, fmt.Errorf("search failed: %w", err)

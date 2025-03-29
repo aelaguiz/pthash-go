@@ -130,3 +130,21 @@ func ComputeNumPartitions(numKeys uint64, avgPartitionSize uint64) uint64 {
 	}
 	return uint64(math.Ceil(float64(numKeys) / float64(avgPartitionSize)))
 }
+
+// MinimalTableSize calculates the target table size based on config.
+func MinimalTableSize(numKeys uint64, alpha float64, search SearchType) uint64 {
+	if alpha == 0 { // Avoid division by zero
+		return numKeys // Or some other sensible default/error
+	}
+	tableSize := uint64(float64(numKeys) / alpha)
+	if search == SearchTypeXOR && (tableSize&(tableSize-1)) == 0 && tableSize > 0 {
+		tableSize++
+	}
+	// Ensure table size is at least numKeys if minimal
+	if tableSize < numKeys {
+		// This can happen if alpha > 1, which should be caught earlier,
+		// but also due to float precision for alpha very close to 1.
+		tableSize = numKeys
+	}
+	return tableSize
+}
