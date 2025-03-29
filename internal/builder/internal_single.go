@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+type TakenBits interface {
+	Get(pos uint64) bool
+	Size() uint64
+}
+
+// Ensure *core.BitVector satisfies TakenBits
+var _ TakenBits = (*core.BitVector)(nil)
+
 // Type alias for convenience
 type pairsT = []core.BucketPayloadPair
 
@@ -650,7 +658,7 @@ func (pw *pilotsWrapper) EmplaceBack(bucketID core.BucketIDType, pilot uint64) {
 
 // fillFreeSlots calculates the remapping for minimal perfect hashing.
 // Corresponds to C++ fill_free_slots.
-func fillFreeSlots(taken *core.BitVector, numKeys uint64, freeSlots *[]uint64, tableSize uint64) {
+func fillFreeSlots(taken TakenBits, numKeys uint64, freeSlots *[]uint64, tableSize uint64) {
 	if tableSize <= numKeys {
 		return // No free slots to fill
 	}

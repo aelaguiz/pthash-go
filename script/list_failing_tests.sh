@@ -35,6 +35,17 @@ while read -r test_name; do
     echo ""
 done < "$TEMP_FILE"
 
+# Generate a command to run only failing tests
+if [ -s "$TEMP_FILE" ]; then
+    # Properly format test names by trimming whitespace and creating a valid regex
+    TEST_REGEX=$(awk '{gsub(/^[ \t]+|[ \t]+$/, ""); print}' "$TEMP_FILE" | tr '\n' '|' | sed 's/|$//')
+    echo "======================="
+    echo "Command to run only failing tests (copy and run this):"
+    # Print without wrapping to make it easy to copy
+    COMMAND="go test -v $PACKAGE_PATTERN -run=\"$TEST_REGEX\""
+    printf "%s\n" "$COMMAND"
+fi
+
 # Clean up
 rm "$TEMP_FILE"
 rm "$BUILD_FAIL_FILE"

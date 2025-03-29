@@ -46,13 +46,13 @@ type InterleavingPilotsIterator[K any, H core.Hasher[K], B core.Bucketer] struct
 }
 
 // NewInterleavingPilotsIterator creates an iterator that returns pilots in interleaved order.
-func NewInterleavingPilotsIterator[K any, H core.Hasher[K], B core.Bucketer](pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) *InterleavingPilotsIterator[K,H,B] {
+func NewInterleavingPilotsIterator[K any, H core.Hasher[K], B core.Bucketer](pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) *InterleavingPilotsIterator[K, H, B] {
 	numBuckets := uint64(0)
 	if len(pb.Builders()) > 0 && pb.Builders()[0] != nil {
 		// Assume all sub-builders were configured with the same number of buckets
 		numBuckets = pb.Builders()[0].NumBuckets()
 	}
-	return &InterleavingPilotsIterator[K,H,B] {
+	return &InterleavingPilotsIterator[K, H, B]{
 		builders:      pb.Builders(),
 		numPartitions: pb.NumPartitions(),
 		numBuckets:    numBuckets,
@@ -62,12 +62,12 @@ func NewInterleavingPilotsIterator[K any, H core.Hasher[K], B core.Bucketer](pb 
 }
 
 // HasNext returns true if there are more pilots to iterate.
-func (it *InterleavingPilotsIterator[K,H,B]) HasNext() bool {
+func (it *InterleavingPilotsIterator[K, H, B]) HasNext() bool {
 	return it.currBucket < it.numBuckets
 }
 
 // Next returns the next pilot in interleaved order.
-func (it *InterleavingPilotsIterator[K,H,B]) Next() uint64 {
+func (it *InterleavingPilotsIterator[K, H, B]) Next() uint64 {
 	if !it.HasNext() {
 		panic("InterleavingPilotsIterator.Next called after end")
 	}
@@ -96,17 +96,17 @@ type partitionedTakenView[K any, H core.Hasher[K], B core.Bucketer] struct {
 }
 
 // newPartitionedTakenView creates a view of taken bits across all partitions.
-func newPartitionedTakenView[K any, H core.Hasher[K], B core.Bucketer](builders []*InternalMemoryBuilderSinglePHF[K, H, B]) *partitionedTakenView[K,H,B] {
-	return &partitionedTakenView[K,H,B]{builders: builders}
+func newPartitionedTakenView[K any, H core.Hasher[K], B core.Bucketer](builders []*InternalMemoryBuilderSinglePHF[K, H, B]) *partitionedTakenView[K, H, B] {
+	return &partitionedTakenView[K, H, B]{builders: builders}
 }
 
 // Get returns true if the bit at position pos is set in any partition.
-func (ptv *partitionedTakenView[K,H,B]) Get(pos uint64) bool {
+func (ptv *partitionedTakenView[K, H, B]) Get(pos uint64) bool {
 	// Find which sub-builder 'pos' falls into. Requires knowing sub-table sizes.
 	currentOffset := uint64(0)
 	for _, subBuilder := range ptv.builders {
 		subTableSize := subBuilder.TableSize()
-		if pos < currentOffset + subTableSize {
+		if pos < currentOffset+subTableSize {
 			// Found the partition
 			subPos := pos - currentOffset
 			if subBuilder.Taken() == nil { // Handle nil taken vector (e.g., empty partition)
@@ -122,7 +122,7 @@ func (ptv *partitionedTakenView[K,H,B]) Get(pos uint64) bool {
 }
 
 // Size returns the total size of the taken view.
-func (ptv *partitionedTakenView[K,H,B]) Size() uint64 {
+func (ptv *partitionedTakenView[K, H, B]) Size() uint64 {
 	totalSize := uint64(0)
 	for _, subBuilder := range ptv.builders {
 		totalSize += subBuilder.TableSize()
@@ -264,7 +264,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 		pb.subBuilders[i] = NewInternalMemoryBuilderSinglePHF[K, H, B](pb.hasher, subBucketer)
 	}
 	pb.rawPartitionOffsets[pb.numPartitions] = cumulativeOffset // Final raw offset
-	pb.offsets = pb.rawPartitionOffsets // For non-dense, offsets are the raw ones. Dense will overwrite later.
+	pb.offsets = pb.rawPartitionOffsets                         // For non-dense, offsets are the raw ones. Dense will overwrite later.
 	// Offset calculation is part of partitioning timing? Or separate setup time? Let's include in partitioning.
 	pb.timings.PartitioningMicroseconds += time.Since(offsetStart)
 
@@ -284,14 +284,17 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 	// Encoding time happens when the final PHF calls Build, not here.
 
 	// --- Fill Free Slots (Only for Dense + Minimal) ---
-	// C++ stores this in the partitioned builder for dense mode.
 	if config.Minimal && config.DensePartitioning {
 		freeSlotStart := time.Now()
-		pb.freeSlots = make([]uint64, 0, pb.tableSize-pb.numKeys) // Estimate capacity
-		// Need a way to logically view all 'taken' bits across sub-builders
-		// Create a 'taken' view/iterator on the fly?
-		takenView := newPartitionedTakenView[K, H, B](pb.subBuilders)
-		fillFreeSlots(takenView, pb.numKeys, &pb.freeSlots, pb.tableSize)
+		// Check if tableSize is actually larger than numKeys before allocating
+		if pb.tableSize > pb.numKeys {
+			pb.freeSlots = make([]uint64, 0, pb.tableSize-pb.numKeys) // Estimate capacity
+			takenView := newPartitionedTakenView[K, H, B](pb.subBuilders)
+			// Pass the interface satisfying view to fillFreeSlots
+			fillFreeSlots(takenView, pb.numKeys, &pb.freeSlots, pb.tableSize) // Pass takenView here
+		} else {
+			pb.freeSlots = nil // No free slots needed
+		}
 		pb.timings.SearchingMicroseconds += time.Since(freeSlotStart) // Add to search time
 	} else {
 		pb.freeSlots = nil

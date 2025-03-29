@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const maxPilotAttempts = 50_000_000 // TEMPORARY DEBUG LIMIT
+
 // Search orchestrates the pilot search based on config.
 func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
@@ -37,7 +39,7 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 
 	// FastMod parameter(s) for table size
 	tableSize := core.MinimalTableSize(numKeys, config.Alpha, config.Search)
-	mTableSize64 := core.ComputeM64(tableSize) // For XOR
+	mTableSize64 := core.ComputeM64(tableSize)         // For XOR
 	mTableSize32 := core.ComputeM32(uint32(tableSize)) // For ADD
 
 	var err error
@@ -111,12 +113,7 @@ func searchSequentialXOR(
 
 		foundPilot := false
 		pilotSearchStartTime := time.Now()
-		const maxPilotAttempts = 50_000_000 // TEMPORARY DEBUG LIMIT
 		for pilot := uint64(0); ; pilot++ {
-			// Safety check to prevent infinite loops during debugging
-			if pilot >= maxPilotAttempts {
-				return fmt.Errorf("DEBUG: Exceeded max pilot attempts (%d) for bucket %d", maxPilotAttempts, bucketID)
-			}
 			// Log progress every 100,000 iterations
 			if pilot > 0 && pilot%100000 == 0 {
 				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v",
@@ -408,7 +405,6 @@ func searchParallelXOR(
 
 	return nil
 }
-// searchSequentialAdd finds pilots sequentially using Additive displacement.
 func searchSequentialAdd(
 	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
 	config *core.BuildConfig,
@@ -429,108 +425,14 @@ func searchSequentialAdd(
 	for bucketsIt.HasNext() {
 		bucket := bucketsIt.Next()
 		bucketSize := bucket.Size()
-		if bucketSize == 0 { continue } // Should not happen
+		if bucketSize == 0 {
+			continue
+		} // Should not happen
 		bucketID := bucket.ID()
 		payloads := bucket.Payloads() // These are hash.Second() values
 
 		foundPilot := false
 		for pilot := uint64(0); ; pilot++ { // Infinite loop until pilot found (or seed error)
-			// Safety check
-			if pilot >= maxPilotAttempts { // Use same constant as XOR
-				return fmt.Errorf("DEBUG: Exceeded max pilot attempts (%d) for bucket %d (ADD)", maxPilotAttempts, bucketID)
-			}
-
-			s := core.FastDivU32(uint32(pilot), m64) // Calculate s = pilot / tableSize (approx)
-
-			positions = positions[:0] // Clear slice
-			collisionFound := false
-
-			for _, pld := range payloads {
-				hashSecond := pld
-				// Calculate position: fastmod_u32(((mix(h2+s)) >> 33) + pilot, M, d)
-				valToMix := hashSecond + uint64(s)
-				mixedHash := core.Mix64(valToMix)
-				term1 := mixedHash >> 33
-				sum := term1 + pilot // Add full pilot
-				p := uint64(core.FastModU32(uint32(sum), m64, d32))
-
-				// Check collision with taken bits
-				if taken.Get(p) {
-					collisionFound = true
-					break
-				}
-				positions = append(positions, p)
-			}
-
-			if collisionFound {
-				continue // Try next pilot
-			}
-
-			// Check for in-bucket collisions
-			sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
-			inBucketCollision := false
-			for i := 1; i < len(positions); i++ {
-				if positions[i] == positions[i-1] {
-					inBucketCollision = true
-					break
-				}
-			}
-			if inBucketCollision {
-				continue // Try next pilot
-			}
-
-			// Pilot found!
-			pilots.EmplaceBack(bucketID, pilot)
-			for _, p := range positions {
-				taken.Set(p) // Mark slots as taken
-			}
-			logger.Update(processedBuckets, bucketSize)
-			foundPilot = true
-			break // Move to next bucket
-		} // End pilot search loop
-
-		if !foundPilot {
-			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d (ADD)", bucketID)}
-		}
-		processedBuckets++
-	} // End bucket iteration
-
-	if processedBuckets != numNonEmptyBuckets {
-		util.Log(config.Verbose, "Warning (ADD): Processed %d buckets, expected %d non-empty", processedBuckets, numNonEmptyBuckets)
-	}
-	return nil
-}
-// searchSequentialAdd finds pilots sequentially using Additive displacement.
-func searchSequentialAdd(
-	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
-	config *core.BuildConfig,
-	bucketsIt *bucketsIteratorT,
-	taken *core.BitVectorBuilder, // NOTE: Not concurrent safe
-	pilots PilotsBuffer,
-	logger *SearchLogger,
-	// No hashedPilotsCache needed for additive
-	// Needs m64 and tableSize for fastmod32
-	m64 core.M32, // Precomputed M for fastmod32
-	tableSize uint64, // Needed for d parameter
-) error {
-	positions := make([]uint64, 0, core.MaxBucketSize)
-	d32 := uint32(tableSize) // Precompute for modulo
-
-	processedBuckets := uint64(0)
-
-	for bucketsIt.HasNext() {
-		bucket := bucketsIt.Next()
-		bucketSize := bucket.Size()
-		if bucketSize == 0 { continue } // Should not happen
-		bucketID := bucket.ID()
-		payloads := bucket.Payloads() // These are hash.Second() values
-
-		foundPilot := false
-		for pilot := uint64(0); ; pilot++ { // Infinite loop until pilot found (or seed error)
-			// Safety check
-			if pilot >= maxPilotAttempts { // Use same constant as XOR
-				return fmt.Errorf("DEBUG: Exceeded max pilot attempts (%d) for bucket %d (ADD)", maxPilotAttempts, bucketID)
-			}
 
 			s := core.FastDivU32(uint32(pilot), m64) // Calculate s = pilot / tableSize (approx)
 
