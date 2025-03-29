@@ -264,3 +264,82 @@ func TestDiffEncoderRoundtrip(t *testing.T) {
 		})
 	}
 }
+func TestEliasFanoRoundtrip(t *testing.T) {
+	testCases := [][]uint64{
+		{},                            // Empty
+		{0},                           // Single zero
+		{5},                           // Single non-zero
+		{0, 1, 2, 3, 4, 5},            // Contiguous
+		{10, 20, 30, 40, 50},          // Spaced
+		{0, 10, 11, 12, 100, 1000},    // Mixed gaps
+		{0, 1, 10, 100, 1000, 10000},  // Exponential-ish gaps
+		{^uint64(0) - 10, ^uint64(0)}, // Large values
+	}
+
+	// Add random case
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	size := 100 + rng.Intn(200)
+	randVals := make(map[uint64]struct{}) // Use map for uniqueness
+	maxVal := uint64(rng.Int63n(100000) + 1000)
+	for len(randVals) < size {
+		randVals[uint64(rng.Int63n(int64(maxVal)))] = struct{}{}
+	}
+	finalRandVals := make([]uint64, 0, size)
+	for k := range randVals {
+		finalRandVals = append(finalRandVals, k)
+	}
+	sort.Slice(finalRandVals, func(i, j int) bool { return finalRandVals[i] < finalRandVals[j] })
+	testCases = append(testCases, finalRandVals)
+
+	for _, values := range testCases {
+		t.Run(fmt.Sprintf("N=%d", len(values)), func(t *testing.T) {
+			ef := NewEliasFano()
+			err := ef.Encode(values)
+			if err != nil {
+				t.Fatalf("Encode failed: %v", err)
+			}
+
+			if ef.Size() != uint64(len(values)) {
+				t.Fatalf("Size mismatch: got %d, want %d", ef.Size(), len(values))
+			}
+
+			// Verify Access
+			for i, expected := range values {
+				got := ef.Access(uint64(i))
+				if got != expected {
+					t.Errorf("Access(%d): got %d, want %d", i, got, expected)
+					// break // Optional
+				}
+			}
+
+			// Verify size check panic
+			if len(values) > 0 {
+				assertPanic(t, "Access(out_of_bounds)", func() { ef.Access(uint64(len(values))) })
+			}
+
+			// Test serialization roundtrip
+			data, err := ef.MarshalBinary()
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+
+			ef2 := NewEliasFano()
+			err = ef2.UnmarshalBinary(data)
+			if err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+
+			// Deep comparison is hard, just check size and access again
+			if ef2.Size() != uint64(len(values)) {
+				t.Fatalf("Size mismatch after unmarshal: got %d, want %d", ef2.Size(), len(values))
+			}
+			for i, expected := range values {
+				got := ef2.Access(uint64(i))
+				if got != expected {
+					t.Errorf("Access(%d) after unmarshal: got %d, want %d", i, got, expected)
+				}
+			}
+
+		})
+	}
+}
