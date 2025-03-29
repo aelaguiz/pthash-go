@@ -36,7 +36,10 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	mTableSize := core.ComputeM64(tableSize)
 
 	var err error
+	log.Printf("Search decision: NumThreads=%d, NumNonEmptyBuckets=%d, Required=%d", 
+		config.NumThreads, numNonEmptyBuckets, uint64(config.NumThreads)*2)
 	if config.NumThreads > 1 && numNonEmptyBuckets >= uint64(config.NumThreads)*2 { // Add heuristic for parallelism benefit
+		log.Printf("Using PARALLEL search with %d threads", config.NumThreads)
 		if config.Search == core.SearchTypeXOR {
 			err = searchParallelXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
 				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize, tableSize)
@@ -47,6 +50,8 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 			return fmt.Errorf("unknown search type: %v", config.Search)
 		}
 	} else {
+		log.Printf("Using SEQUENTIAL search: threads=%d or buckets=%d < required=%d", 
+			config.NumThreads, numNonEmptyBuckets, uint64(config.NumThreads)*2)
 		if config.Search == core.SearchTypeXOR {
 			err = searchSequentialXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
 				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize, tableSize)
@@ -243,6 +248,7 @@ func searchParallelXOR(
 
 	// Worker goroutine function
 	worker := func(tid int) {
+		log.Printf("Worker thread %d started", tid)
 		defer wg.Done()
 		positions := make([]uint64, 0, core.MaxBucketSize) // Thread-local buffer
 
@@ -379,6 +385,7 @@ func searchParallelXOR(
 	} // End worker func
 
 	// Start workers
+	log.Printf("Starting %d worker goroutines for parallel search", numThreads)
 	for i := 0; i < numThreads; i++ {
 		go worker(i)
 	}

@@ -120,6 +120,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								config.Search = searchType
 								config.Verbose = true                // Keep tests quiet unless debugging
 								config.NumThreads = runtime.NumCPU() // Use all available CPUs
+								log.Printf("Test configured to use %d threads (runtime.NumCPU())", config.NumThreads)
 								// Use a fixed seed for reproducibility within a test run
 								// config.Seed = uint64(rand.Int63()) // Use random later
 								config.Seed = 12345 // Fixed seed for debugging
