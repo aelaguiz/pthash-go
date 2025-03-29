@@ -2,7 +2,6 @@ package builder
 
 import (
 	"fmt"
-	"log"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"reflect"
@@ -153,7 +152,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 		// Create a proper bucketer instance based on whether B is a pointer type
 		// For pointer types (like *core.SkewBucketer), we need to allocate memory
 		var subBucketer B
-		
+
 		// The test is using B = *core.SkewBucketer, so we need to create a non-nil instance
 		// We can detect if B is a pointer type and create an appropriate instance
 		if isPointerType := reflect.TypeOf(subBucketer).Kind() == reflect.Ptr; isPointerType {
@@ -163,7 +162,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 			var ifaceB any = concreteSubBucketer
 			subBucketer = ifaceB.(B)
 		}
-		
+
 		pb.subBuilders[i] = NewInternalMemoryBuilderSinglePHF[K, H, B](pb.hasher, subBucketer)
 	}
 	pb.offsets[pb.numPartitions] = cumulativeOffset
