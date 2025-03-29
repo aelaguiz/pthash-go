@@ -1,13 +1,11 @@
 package pthash
 
 import (
-	"encoding"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"pthashgo/internal/builder"
 	"pthashgo/internal/core"
-	"pthashgo/internal/serial"
 	"pthashgo/internal/util"
 	"sync"
 	"time"
@@ -23,17 +21,17 @@ import (
 type PartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct {
 	seed        uint64
 	numKeys     uint64
-	tableSize   uint64               // Total size estimate across partitions
-	partitioner core.RangeBucketer   // Used to map key hash to partition
+	tableSize   uint64                  // Total size estimate across partitions
+	partitioner core.RangeBucketer      // Used to map key hash to partition
 	partitions  []partition[K, H, B, E] // Slice of sub-PHFs
-	hasher      H                    // Store hasher instance
+	hasher      H                       // Store hasher instance
 	isMinimal   bool
 	searchType  core.SearchType
 }
 
 // partition stores the offset and the sub-PHF for a single partition.
 type partition[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder] struct {
-	offset uint64                  // Starting offset for this partition's output range
+	offset uint64                 // Starting offset for this partition's output range
 	phf    *SinglePHF[K, H, B, E] // The actual sub-PHF for this partition
 }
 
@@ -67,9 +65,8 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 	}
 	// Basic check if sub-builders seem initialized
 	if len(pb.Builders()) != int(pb.NumPartitions()) {
-	    return 0, fmt.Errorf("builder state inconsistent: %d sub-builders for %d partitions", len(pb.Builders()), pb.NumPartitions())
+		return 0, fmt.Errorf("builder state inconsistent: %d sub-builders for %d partitions", len(pb.Builders()), pb.NumPartitions())
 	}
-
 
 	// --- Copy final state from builder ---
 	f.seed = pb.Seed()
@@ -84,14 +81,20 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 
 	// --- Create final PHF structures for each partition ---
 	// This involves encoding the data from each sub-builder into the final sub-PHF structure.
-	encodeStart := time.Now()
+	// encodeStart := time.Now()
 	var totalEncodingTime time.Duration
 
 	// Use concurrency similar to C++ if beneficial
 	numThreads := config.NumThreads
-	if numThreads <= 0 { numThreads = 1}
-	if numThreads > int(numPartitions) { numThreads = int(numPartitions)}
-	if numPartitions == 0 { numThreads = 0 } // Avoid spawning goroutines if no partitions
+	if numThreads <= 0 {
+		numThreads = 1
+	}
+	if numThreads > int(numPartitions) {
+		numThreads = int(numPartitions)
+	}
+	if numPartitions == 0 {
+		numThreads = 0
+	} // Avoid spawning goroutines if no partitions
 
 	if numThreads > 1 {
 		var wg sync.WaitGroup
@@ -137,11 +140,17 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 
 		var firstError error
 		for err := range errChan {
-			if err != nil && firstError == nil { firstError = err }
+			if err != nil && firstError == nil {
+				firstError = err
+			}
 		}
-		if firstError != nil { return 0, firstError }
+		if firstError != nil {
+			return 0, firstError
+		}
 
-		for encTime := range timingChan { totalEncodingTime += encTime }
+		for encTime := range timingChan {
+			totalEncodingTime += encTime
+		}
 
 	} else { // Sequential encoding
 		for i := uint64(0); i < numPartitions; i++ {
@@ -162,7 +171,6 @@ func (f *PartitionedPHF[K, H, B, E]) Build(
 			totalEncodingTime += encTime
 		}
 	}
-
 
 	totalBuildTime := time.Since(start) // Includes sub-build time stored in builder + final encoding
 	util.Log(config.Verbose, "PartitionedPHF final build stage took: %v (Encoding sum: %v)", totalBuildTime, totalEncodingTime)
@@ -200,10 +208,10 @@ func (f *PartitionedPHF[K, H, B, E]) Lookup(key K) uint64 {
 }
 
 // --- Accessors ---
-func (f *PartitionedPHF[K, H, B, E]) NumKeys() uint64 { return f.numKeys }
+func (f *PartitionedPHF[K, H, B, E]) NumKeys() uint64   { return f.numKeys }
 func (f *PartitionedPHF[K, H, B, E]) TableSize() uint64 { return f.tableSize } // Note: Estimated total
-func (f *PartitionedPHF[K, H, B, E]) Seed() uint64    { return f.seed }
-func (f *PartitionedPHF[K, H, B, E]) IsMinimal() bool { return f.isMinimal }
+func (f *PartitionedPHF[K, H, B, E]) Seed() uint64      { return f.seed }
+func (f *PartitionedPHF[K, H, B, E]) IsMinimal() bool   { return f.isMinimal }
 
 // --- Space Calculation ---
 func (f *PartitionedPHF[K, H, B, E]) NumBits() uint64 {
@@ -231,7 +239,9 @@ func (f *PartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 
 	// 1. Marshal partitioner
 	partitionerData, err := tryMarshal(&f.partitioner) // Pass pointer
-	if err != nil { return nil, fmt.Errorf("failed to marshal partitioner: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal partitioner: %w", err)
+	}
 
 	// 2. Marshal each sub-PHF
 	partitionData := make([][]byte, len(f.partitions))
@@ -242,7 +252,9 @@ func (f *PartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 			partitionData[i] = []byte{}
 		} else {
 			data, err := tryMarshal(p.phf)
-			if err != nil { return nil, fmt.Errorf("failed to marshal sub-PHF %d: %w", i, err) }
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal sub-PHF %d: %w", i, err)
+			}
 			partitionData[i] = data
 			totalPartitionDataLen += len(data)
 		}
@@ -256,39 +268,54 @@ func (f *PartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	headerSize := 8 + 24
 	totalSize := headerSize
 	totalSize += 8 + len(partitionerData)
-	totalSize += 8 // numPartitions
-	totalSize += len(f.partitions) * (8 + 8) + totalPartitionDataLen // offsets + lengths + data
+	totalSize += 8                                               // numPartitions
+	totalSize += len(f.partitions)*(8+8) + totalPartitionDataLen // offsets + lengths + data
 
 	buf := make([]byte, totalSize)
 	offset := 0
 
 	// Header
-	copy(buf[offset:offset+4], []byte(partitionedPHFMagic)); offset += 4
-	buf[offset] = 1; offset += 1 // Version
+	copy(buf[offset:offset+4], []byte(partitionedPHFMagic))
+	offset += 4
+	buf[offset] = 1
+	offset += 1 // Version
 	flags := byte(0)
-	if f.isMinimal { flags |= 1 }
+	if f.isMinimal {
+		flags |= 1
+	}
 	flags |= (byte(f.searchType) << 1)
-	buf[offset] = flags; offset += 1
-	binary.LittleEndian.PutUint16(buf[offset:offset+2], 0); offset += 2 // Reserved
+	buf[offset] = flags
+	offset += 1
+	binary.LittleEndian.PutUint16(buf[offset:offset+2], 0)
+	offset += 2 // Reserved
 
 	// Core
-	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.seed); offset += 8
-	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.numKeys); offset += 8
-	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.tableSize); offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.seed)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.numKeys)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:offset+8], f.tableSize)
+	offset += 8
 
 	// Partitioner
-	binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(len(partitionerData))); offset += 8
-	copy(buf[offset:], partitionerData); offset += len(partitionerData)
+	binary.LittleEndian.PutUint64(buf[offset:offset+8], uint64(len(partitionerData)))
+	offset += 8
+	copy(buf[offset:], partitionerData)
+	offset += len(partitionerData)
 
 	// Partitions
 	numPartitions := uint64(len(f.partitions))
-	binary.LittleEndian.PutUint64(buf[offset:offset+8], numPartitions); offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:offset+8], numPartitions)
+	offset += 8
 	for i := uint64(0); i < numPartitions; i++ {
 		pData := partitionData[i]
 		pLen := uint64(len(pData))
-		binary.LittleEndian.PutUint64(buf[offset:offset+8], f.partitions[i].offset); offset += 8
-		binary.LittleEndian.PutUint64(buf[offset:offset+8], pLen); offset += 8
-		copy(buf[offset:], pData); offset += int(pLen)
+		binary.LittleEndian.PutUint64(buf[offset:offset+8], f.partitions[i].offset)
+		offset += 8
+		binary.LittleEndian.PutUint64(buf[offset:offset+8], pLen)
+		offset += 8
+		copy(buf[offset:], pData)
+		offset += int(pLen)
 	}
 
 	if offset != totalSize {
@@ -298,57 +325,84 @@ func (f *PartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	return buf, nil
 }
 
-
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
 // Requires the types K, H, B, E to be known at compile time when calling.
 func (f *PartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	headerSize := 8 + 24
-	if len(data) < headerSize { return io.ErrUnexpectedEOF }
+	if len(data) < headerSize {
+		return io.ErrUnexpectedEOF
+	}
 	offset := 0
 
 	// Header
-	if string(data[offset:offset+4]) != partitionedPHFMagic { return fmt.Errorf("invalid magic identifier") }
+	if string(data[offset:offset+4]) != partitionedPHFMagic {
+		return fmt.Errorf("invalid magic identifier")
+	}
 	offset += 4
-	version := data[offset]; offset += 1
-	if version != 1 { return fmt.Errorf("unsupported version: %d", version) }
-	flags := data[offset]; offset += 1
+	version := data[offset]
+	offset += 1
+	if version != 1 {
+		return fmt.Errorf("unsupported version: %d", version)
+	}
+	flags := data[offset]
+	offset += 1
 	f.isMinimal = (flags & 1) != 0
 	f.searchType = core.SearchType((flags >> 1) & 3)
 	offset += 2 // Reserved
 
 	// Core
-	f.seed = binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
-	f.numKeys = binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
-	f.tableSize = binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
+	f.seed = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	f.numKeys = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	f.tableSize = binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
 
 	// Partitioner
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
-	partitionerLen := binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
-	if offset+int(partitionerLen) > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	partitionerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
+	if offset+int(partitionerLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	// RangeBucketer is simple, can unmarshal directly if it implements the interface
 	err := tryUnmarshal(&f.partitioner, data[offset:offset+int(partitionerLen)])
-	if err != nil { return fmt.Errorf("failed to unmarshal partitioner: %w", err) }
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal partitioner: %w", err)
+	}
 	offset += int(partitionerLen)
 
 	// Partitions
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
-	numPartitions := binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	numPartitions := binary.LittleEndian.Uint64(data[offset : offset+8])
+	offset += 8
 	f.partitions = make([]partition[K, H, B, E], numPartitions)
 
 	for i := uint64(0); i < numPartitions; i++ {
-		if offset+8+8 > len(data) { return io.ErrUnexpectedEOF } // offset + phfLen
-		f.partitions[i].offset = binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
-		phfLen := binary.LittleEndian.Uint64(data[offset:offset+8]); offset += 8
-		if offset+int(phfLen) > len(data) { return io.ErrUnexpectedEOF }
+		if offset+8+8 > len(data) {
+			return io.ErrUnexpectedEOF
+		} // offset + phfLen
+		f.partitions[i].offset = binary.LittleEndian.Uint64(data[offset : offset+8])
+		offset += 8
+		phfLen := binary.LittleEndian.Uint64(data[offset : offset+8])
+		offset += 8
+		if offset+int(phfLen) > len(data) {
+			return io.ErrUnexpectedEOF
+		}
 
 		// Create a new sub-PHF instance and unmarshal into it
 		subPHF := NewSinglePHF[K, H, B, E](f.isMinimal, f.searchType) // Create with matching params
 		err = tryUnmarshal(subPHF, data[offset:offset+int(phfLen)])
-		if err != nil { return fmt.Errorf("failed to unmarshal sub-PHF %d: %w", i, err) }
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal sub-PHF %d: %w", i, err)
+		}
 		f.partitions[i].phf = subPHF
 		offset += int(phfLen)
 	}
-
 
 	if offset != len(data) {
 		return fmt.Errorf("extra data detected after unmarshaling")
