@@ -14,22 +14,26 @@ type Encoder interface {
 
 // --- Placeholder Implementations ---
 
-type RiceEncoder struct { /* TODO */ }
+type RiceEncoder struct { /* TODO */
+}
 
 func (e *RiceEncoder) Encode(pilots []uint64) error { /* TODO */ return nil }
-func (e *RiceEncoder) Access(i uint64) uint64      { /* TODO */ return 0 }
-func (e *RiceEncoder) NumBits() uint64            { /* TODO */ return 0 }
+func (e *RiceEncoder) Access(i uint64) uint64       { /* TODO */ return 0 }
+func (e *RiceEncoder) NumBits() uint64              { /* TODO */ return 0 }
 
-type CompactEncoder struct { /* TODO */ }
+type CompactEncoder struct { /* TODO */
+}
 
 func (e *CompactEncoder) Encode(pilots []uint64) error { /* TODO */ return nil }
-func (e *CompactEncoder) Access(i uint64) uint64      { /* TODO */ return 0 }
-func (e *CompactEncoder) NumBits() uint64            { /* TODO */ return 0 }
+func (e *CompactEncoder) Access(i uint64) uint64       { /* TODO */ return 0 }
+func (e *CompactEncoder) NumBits() uint64              { /* TODO */ return 0 }
 
 // EliasFano is needed for minimal PHF free slots. Placeholder.
-type EliasFano struct { /* TODO */ }
+type EliasFano struct { /* TODO */
+}
 
 // TODO: Implement DualEncoder, DenseEncoder interfaces/structs later
 
 // Placeholder diff encoder for dense partitioned offsets
-type DiffCompactEncoder struct { /* TODO */ }
+type DiffCompactEncoder struct { /* TODO */
+}
