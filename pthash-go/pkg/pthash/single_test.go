@@ -8,6 +8,7 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"pthashgo/pkg/pthash"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -118,7 +119,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								config.Minimal = minimal
 								config.Search = searchType
 								config.Verbose = false // Keep tests quiet unless debugging
-								config.NumThreads = 1  // FORCE SEQUENTIAL for this check
+								config.NumThreads = runtime.NumCPU() // Use all available CPUs
 								// Use a fixed seed for reproducibility within a test run
 								// config.Seed = uint64(rand.Int63()) // Use random later
 								config.Seed = 12345 // Fixed seed for debugging
