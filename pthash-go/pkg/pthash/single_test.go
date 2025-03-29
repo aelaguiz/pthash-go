@@ -117,7 +117,7 @@ func TestInternalSinglePHFBuildAndCheck(t *testing.T) {
 								config.Minimal = minimal
 								config.Search = searchType
 								config.Verbose = false // Keep tests quiet unless debugging
-								config.NumThreads = runtime.NumCPU()
+								config.NumThreads = 1 // FORCE SEQUENTIAL for this check
 								// Use a fixed seed for reproducibility within a test run
 								config.Seed = uint64(rand.Int63()) // Fixed random seed per subtest
 
