@@ -220,18 +220,6 @@ func searchParallelXOR(
 	var takenMu sync.Mutex
 	var pilotsMu sync.Mutex // Assuming PilotsBuffer is not inherently safe
 
-	// Wrap taken builder methods for concurrency
-	takenSet := func(pos uint64) {
-		takenMu.Lock()
-		taken.Set(pos)
-		takenMu.Unlock()
-	}
-	takenGet := func(pos uint64) bool {
-		takenMu.Lock()
-		res := taken.Get(pos)
-		takenMu.Unlock()
-		return res
-	}
 	// Wrap pilots buffer
 	pilotsEmplaceBack := func(bucketID core.BucketIDType, pilot uint64) {
 		pilotsMu.Lock()
@@ -296,7 +284,9 @@ func searchParallelXOR(
 						for _, pld := range payloads {
 							hash := pld
 							p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
-							if takenGet(p) { // Concurrent read
+							// Optimistic check without lock - might be stale but that's OK
+							// Final verification will happen under lock
+							if taken.Get(p) {
 								collisionFound = true
 								break
 							}
@@ -330,7 +320,8 @@ func searchParallelXOR(
 				} else { // pilotChecked was true, just re-verify positions against 'taken'
 					foundPotentialPilot = true // Assume it's still potentially valid
 					for _, p := range positions {
-						if takenGet(p) { // Concurrent read
+						// Optimistic check without lock - might be stale but that's OK
+						if taken.Get(p) {
 							pilotChecked = false // Collision detected, must search again
 							foundPotentialPilot = false
 							break
@@ -363,7 +354,7 @@ func searchParallelXOR(
 				if commitOk {
 					// Commit phase: Mark bits and store pilot
 					for _, p := range positions {
-						takenSet(p) // Use the thread-safe wrapper
+						taken.Set(p) // Direct call under lock
 					}
 					takenMu.Unlock() // Unlock after modifying taken
 
