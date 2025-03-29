@@ -4,6 +4,7 @@ package core
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"testing"
 	"time"
 )
@@ -102,13 +103,13 @@ func TestRiceSequenceRoundtrip(t *testing.T) {
 
 func TestEliasFanoRoundtrip(t *testing.T) {
 	testCases := [][]uint64{
-		{},                             // Empty
-		{0},                            // Single zero
-		{5},                            // Single non-zero
-		{0, 1, 2, 3, 4, 5},             // Contiguous
-		{10, 20, 30, 40, 50},           // Spaced
-		{0, 10, 11, 12, 100, 1000},     // Mixed gaps
-		{0, 1, 10, 100, 1000, 10000},   // Exponential-ish gaps
+		{},                            // Empty
+		{0},                           // Single zero
+		{5},                           // Single non-zero
+		{0, 1, 2, 3, 4, 5},            // Contiguous
+		{10, 20, 30, 40, 50},          // Spaced
+		{0, 10, 11, 12, 100, 1000},    // Mixed gaps
+		{0, 1, 10, 100, 1000, 10000},  // Exponential-ish gaps
 		{^uint64(0) - 10, ^uint64(0)}, // Large values
 	}
 
@@ -155,11 +156,15 @@ func TestEliasFanoRoundtrip(t *testing.T) {
 
 			// Test serialization roundtrip
 			data, err := ef.MarshalBinary()
-			if err != nil { t.Fatalf("Marshal failed: %v", err) }
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
 
 			ef2 := NewEliasFano()
 			err = ef2.UnmarshalBinary(data)
-			if err != nil { t.Fatalf("Unmarshal failed: %v", err) }
+			if err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
 
 			// Deep comparison is hard, just check size and access again
 			if ef2.Size() != uint64(len(values)) {
@@ -171,7 +176,6 @@ func TestEliasFanoRoundtrip(t *testing.T) {
 					t.Errorf("Access(%d) after unmarshal: got %d, want %d", i, got, expected)
 				}
 			}
-
 
 		})
 	}

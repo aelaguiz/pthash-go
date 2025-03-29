@@ -2,7 +2,6 @@
 package core
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 )
@@ -79,17 +78,23 @@ func TestD1ArrayEmpty(t *testing.T) {
 }
 
 // Test Serialization
-func TestD1ArraySerialization(t *testing.T){
+func TestD1ArraySerialization(t *testing.T) {
 	bv1 := NewBitVector(200)
-	bv1.Set(10); bv1.Set(150); bv1.Set(199)
+	bv1.Set(10)
+	bv1.Set(150)
+	bv1.Set(199)
 	d1 := NewD1Array(bv1)
 
 	data, err := d1.MarshalBinary()
-	if err != nil { t.Fatalf("Marshal failed: %v", err) }
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
 
 	d2 := &D1Array{}
 	err = d2.UnmarshalBinary(data)
-	if err != nil { t.Fatalf("Unmarshal failed: %v", err) }
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
 
 	// Compare fields
 	if d1.size != d2.size || d1.numSetBits != d2.numSetBits || len(d1.superBlockRanks) != len(d2.superBlockRanks) || len(d1.blockRanks) != len(d2.blockRanks) {
@@ -101,13 +106,16 @@ func TestD1ArraySerialization(t *testing.T){
 	if !reflect.DeepEqual(d1.blockRanks, d2.blockRanks) {
 		t.Errorf("Block ranks mismatch")
 	}
-	if d1.bv.Size() != d2.bv.Size() || !reflect.DeepEqual(d1.bv.Words(), d2.bv.Words()){
+	if d1.bv.Size() != d2.bv.Size() || !reflect.DeepEqual(d1.bv.Words(), d2.bv.Words()) {
 		t.Errorf("BitVector mismatch")
 	}
 
 	// Check functionality
-	if d1.Rank1(151) != d2.Rank1(151) { t.Errorf("Rank mismatch after unmarshal") }
-	if d1.Select(1) != d2.Select(1) { t.Errorf("Select mismatch after unmarshal") }
-
+	if d1.Rank1(151) != d2.Rank1(151) {
+		t.Errorf("Rank mismatch after unmarshal")
+	}
+	if d1.Select(1) != d2.Select(1) {
+		t.Errorf("Select mismatch after unmarshal")
+	}
 
 }

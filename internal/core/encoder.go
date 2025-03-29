@@ -2,7 +2,9 @@ package core
 
 import (
 	"encoding" // Add this import for BinaryMarshaler/Unmarshaler
+	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"math/bits"
 
@@ -78,7 +80,7 @@ func optimalParameterKiely(values []uint64) uint8 {
 
 	log1MinusP := math.Log(1.0 - p) // Use natural log (Log) for the inner ratio
 	fmt.Printf("[DEBUG] optimalParameterKiely: log(1-p)=%f\n", log1MinusP)
-	if log1MinusP == 0 {             // Avoid division by zero if p is very close to 0
+	if log1MinusP == 0 { // Avoid division by zero if p is very close to 0
 		return 63 // Large parameter if p is tiny
 	}
 
@@ -497,71 +499,7 @@ func (e *CompactEncoder) UnmarshalBinary(data []byte) error {
 }
 
 // --- Helper for RiceSequence: Rank/Select on BitVector ---
-// This is a simple implementation for rank/select structure.
-// A real implementation needs efficient rank/select, often using precomputed tables.
-type D1Array struct {
-	bv *BitVector
-	// Add precomputed data structures for rank/select here
-}
-
-func NewD1Array(bv *BitVector) *D1Array {
-	// TODO: Build rank/select data structures
-	return &D1Array{bv: bv}
-}
-
-// Rank1 returns the number of set bits up to position pos (exclusive).
-func (d *D1Array) Rank1(pos uint64) uint64 {
-	// Slow linear scan for placeholder
-	if d.bv == nil {
-		return 0
-	}
-	count := uint64(0)
-	limit := pos
-	if limit > d.bv.Size() {
-		limit = d.bv.Size()
-	}
-	for i := uint64(0); i < limit; i++ {
-		if d.bv.Get(i) {
-			count++
-		}
-	}
-	return count
-}
-
-// Select returns the position of the (rank+1)-th set bit.
-func (d *D1Array) Select(rank uint64) uint64 {
-	// Slow linear scan for placeholder
-	if d.bv == nil {
-		return 0
-	}
-	count := uint64(0)
-	for i := uint64(0); i < d.bv.Size(); i++ {
-		if d.bv.Get(i) {
-			if count == rank {
-				return i
-			}
-			count++
-		}
-	}
-	return d.bv.Size() // Indicate not found
-}
-
-// NumBits returns the size of the D1Array structure itself.
-func (d *D1Array) NumBits() uint64 {
-	// Size of the pointer + precomputed structures (currently none)
-	return 64 // Placeholder for pointer size
-}
-
-// MarshalBinary implements encoding.BinaryMarshaler.
-func (d *D1Array) MarshalBinary() ([]byte, error) {
-	// TODO: Serialize bv and precomputed structures
-	return nil, fmt.Errorf("D1Array.MarshalBinary not implemented")
-}
-
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (d *D1Array) UnmarshalBinary(data []byte) error {
-	return fmt.Errorf("D1Array.UnmarshalBinary not implemented")
-}
+// This is a simple implement
 
 // --- Placeholder for other encoders ---
 
@@ -623,7 +561,9 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 		l = uint8(math.Floor(math.Log2(ratio)))
 	}
 	// Ensure l is within reasonable bounds (e.g., <= 64)
-	if l > 64 { l = 64 }
+	if l > 64 {
+		l = 64
+	}
 	ef.numLowBits = l
 
 	// Estimate size for upper bits: n '1's + sum(v >> l) '0's
@@ -737,64 +677,104 @@ func (ef *EliasFano) NumBits() uint64 {
 	lbBits := uint64(0)
 	ubBits := uint64(0)
 	selBits := uint64(0)
-	if ef.lowerBits != nil { lbBits = ef.lowerBits.NumBitsStored() }
-	if ef.upperBits != nil { ubBits = ef.upperBits.NumBitsStored() }
-	if ef.upperBitsSelect != nil { selBits = ef.upperBitsSelect.NumBits() }
+	if ef.lowerBits != nil {
+		lbBits = ef.lowerBits.NumBitsStored()
+	}
+	if ef.upperBits != nil {
+		ubBits = ef.upperBits.NumBitsStored()
+	}
+	if ef.upperBitsSelect != nil {
+		selBits = ef.upperBitsSelect.NumBits()
+	}
 	return 8*8 + 8*8 + 8 + lbBits + ubBits + selBits // numValues, universe, numLowBits + data
 }
 
 // MarshalBinary implements encoding.BinaryMarshaler.
 func (ef *EliasFano) MarshalBinary() ([]byte, error) {
-    // Serialize numValues, universe, numLowBits, lowerBits, upperBits, upperBitsSelect
-		// Placeholder implementation
-		lbData, err := serial.TryMarshal(ef.lowerBits)
-		if err != nil { return nil, err}
-		selData, err := serial.TryMarshal(ef.upperBitsSelect) // Marshals BV + Ranks
-		if err != nil { return nil, err}
+	// Serialize numValues, universe, numLowBits, lowerBits, upperBits, upperBitsSelect
+	// Placeholder implementation
+	lbData, err := serial.TryMarshal(ef.lowerBits)
+	if err != nil {
+		return nil, err
+	}
+	selData, err := serial.TryMarshal(ef.upperBitsSelect) // Marshals BV + Ranks
+	if err != nil {
+		return nil, err
+	}
 
-		totalSize := 8 + 8 + 1 + 8 + len(lbData) + 8 + len(selData)
-		buf := make([]byte, totalSize)
-		offset := 0
-		binary.LittleEndian.PutUint64(buf[offset:], ef.numValues); offset += 8
-		binary.LittleEndian.PutUint64(buf[offset:], ef.universe); offset += 8
-		buf[offset] = ef.numLowBits; offset += 1
+	totalSize := 8 + 8 + 1 + 8 + len(lbData) + 8 + len(selData)
+	buf := make([]byte, totalSize)
+	offset := 0
+	binary.LittleEndian.PutUint64(buf[offset:], ef.numValues)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], ef.universe)
+	offset += 8
+	buf[offset] = ef.numLowBits
+	offset += 1
 
-		binary.LittleEndian.PutUint64(buf[offset:], uint64(len(lbData))); offset += 8
-		copy(buf[offset:], lbData); offset += len(lbData)
+	binary.LittleEndian.PutUint64(buf[offset:], uint64(len(lbData)))
+	offset += 8
+	copy(buf[offset:], lbData)
+	offset += len(lbData)
 
-		binary.LittleEndian.PutUint64(buf[offset:], uint64(len(selData))); offset += 8
-		copy(buf[offset:], selData); offset += len(selData)
+	binary.LittleEndian.PutUint64(buf[offset:], uint64(len(selData)))
+	offset += 8
+	copy(buf[offset:], selData)
+	offset += len(selData)
 
-		if offset != totalSize { return nil, fmt.Errorf("EF marshal size mismatch") }
-    return buf, nil
+	if offset != totalSize {
+		return nil, fmt.Errorf("EF marshal size mismatch")
+	}
+	return buf, nil
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (ef *EliasFano) UnmarshalBinary(data []byte) error {
-    // Deserialize fields
-		if len(data) < 8+8+1 { return io.ErrUnexpectedEOF }
-		offset := 0
-		ef.numValues = binary.LittleEndian.Uint64(data[offset:]); offset += 8
-		ef.universe = binary.LittleEndian.Uint64(data[offset:]); offset += 8
-		ef.numLowBits = data[offset]; offset += 1
+	// Deserialize fields
+	if len(data) < 8+8+1 {
+		return io.ErrUnexpectedEOF
+	}
+	offset := 0
+	ef.numValues = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	ef.universe = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	ef.numLowBits = data[offset]
+	offset += 1
 
-		if offset + 8 > len(data) { return io.ErrUnexpectedEOF }
-		lbLen := binary.LittleEndian.Uint64(data[offset:]); offset += 8
-		if offset + int(lbLen) > len(data) { return io.ErrUnexpectedEOF }
-		ef.lowerBits = NewCompactVector(0,0) // Create empty before unmarshal
-		err := serial.TryUnmarshal(ef.lowerBits, data[offset:offset+int(lbLen)])
-		if err != nil { return err }
-		offset += int(lbLen)
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	lbLen := binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	if offset+int(lbLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	ef.lowerBits = NewCompactVector(0, 0) // Create empty before unmarshal
+	err := serial.TryUnmarshal(ef.lowerBits, data[offset:offset+int(lbLen)])
+	if err != nil {
+		return err
+	}
+	offset += int(lbLen)
 
-		if offset + 8 > len(data) { return io.ErrUnexpectedEOF }
-		selLen := binary.LittleEndian.Uint64(data[offset:]); offset += 8
-		if offset + int(selLen) > len(data) { return io.ErrUnexpectedEOF }
-		ef.upperBitsSelect = &D1Array{} // Create empty before unmarshal
-		err = serial.TryUnmarshal(ef.upperBitsSelect, data[offset:offset+int(selLen)])
-		if err != nil { return err }
-		ef.upperBits = ef.upperBitsSelect.bv // Link upperBitsSelect's bv
-		offset += int(selLen)
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	selLen := binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	if offset+int(selLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	ef.upperBitsSelect = &D1Array{} // Create empty before unmarshal
+	err = serial.TryUnmarshal(ef.upperBitsSelect, data[offset:offset+int(selLen)])
+	if err != nil {
+		return err
+	}
+	ef.upperBits = ef.upperBitsSelect.bv // Link upperBitsSelect's bv
+	offset += int(selLen)
 
-		if offset != len(data) { return fmt.Errorf("extra data after EF unmarshal") }
-    return nil
+	if offset != len(data) {
+		return fmt.Errorf("extra data after EF unmarshal")
+	}
+	return nil
 }

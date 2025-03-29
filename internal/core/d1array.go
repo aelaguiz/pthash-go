@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	d1BlockSize     = 512 // Size of a basic block (must be multiple of 64)
-	d1SuperBlockFac = 8   // Number of basic blocks in a superblock
+	d1BlockSize      = 512 // Size of a basic block (must be multiple of 64)
+	d1SuperBlockFac  = 8   // Number of basic blocks in a superblock
 	d1SuperBlockSize = d1BlockSize * d1SuperBlockFac
 )
 
@@ -52,7 +52,7 @@ func NewD1Array(bv *BitVector) *D1Array {
 	currentBlockRank := uint16(0) // Rank within the current superblock
 
 	words := bv.Words()
-	wordIdx := 0
+	// wordIdx := 0
 
 	for sbIdx := uint64(0); sbIdx < numSuperBlocks; sbIdx++ {
 		d1.superBlockRanks[sbIdx] = currentRank
@@ -90,15 +90,20 @@ func NewD1Array(bv *BitVector) *D1Array {
 				wordEndBitGlobal := (w + 1) * 64
 				if blockEndBitGlobal < wordEndBitGlobal && blockEndBitGlobal <= d1.size {
 					endBit = blockEndBitGlobal % 64
-					if endBit == 0 { endBit = 64 } // If ends on boundary
+					if endBit == 0 {
+						endBit = 64
+					} // If ends on boundary
 				}
 				// Also handle overall size boundary within the word
 				if d1.size < wordEndBitGlobal {
 					sizeEndBit := d1.size % 64
-					if sizeEndBit == 0 && d1.size > 0 { sizeEndBit = 64 }
-					if sizeEndBit < endBit { endBit = sizeEndBit }
+					if sizeEndBit == 0 && d1.size > 0 {
+						sizeEndBit = 64
+					}
+					if sizeEndBit < endBit {
+						endBit = sizeEndBit
+					}
 				}
-
 
 				bitsInWordToCount := uint64(0)
 				if endBit > startBit {
@@ -110,7 +115,6 @@ func NewD1Array(bv *BitVector) *D1Array {
 					blockBitCount += uint64(bits.OnesCount64(word & mask))
 				}
 			}
-
 
 			currentRank += blockBitCount
 			if currentBlockRank+uint16(blockBitCount) < currentBlockRank {
@@ -288,46 +292,66 @@ func (d *D1Array) MarshalBinary() ([]byte, error) {
 }
 
 func (d *D1Array) UnmarshalBinary(data []byte) error {
-	if len(data) < 8 { return io.ErrUnexpectedEOF }
+	if len(data) < 8 {
+		return io.ErrUnexpectedEOF
+	}
 	offset := 0
 	bvLen := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
-	if offset+int(bvLen) > len(data) { return io.ErrUnexpectedEOF }
+	if offset+int(bvLen) > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	d.bv = NewBitVector(0) // Create empty first
-	err := d.bv.UnmarshalBinary(data[offset:offset+int(bvLen)])
-	if err != nil { return fmt.Errorf("failed to unmarshal BitVector: %w", err) }
+	err := d.bv.UnmarshalBinary(data[offset : offset+int(bvLen)])
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal BitVector: %w", err)
+	}
 	offset += int(bvLen)
 
-	if offset+8+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	d.size = binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 	d.numSetBits = binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	numSB := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 	expectedSBLen := int(numSB * 8)
-	if offset+expectedSBLen > len(data) { return io.ErrUnexpectedEOF }
+	if offset+expectedSBLen > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	d.superBlockRanks = make([]uint64, numSB)
 	for i := uint64(0); i < numSB; i++ {
 		d.superBlockRanks[i] = binary.LittleEndian.Uint64(data[offset:])
 		offset += 8
 	}
 
-	if offset+8 > len(data) { return io.ErrUnexpectedEOF }
+	if offset+8 > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	numB := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 	expectedBLen := int(numB * 2)
-	if offset+expectedBLen > len(data) { return io.ErrUnexpectedEOF }
+	if offset+expectedBLen > len(data) {
+		return io.ErrUnexpectedEOF
+	}
 	d.blockRanks = make([]uint16, numB)
 	for i := uint64(0); i < numB; i++ {
 		d.blockRanks[i] = binary.LittleEndian.Uint16(data[offset:])
 		offset += 2
 	}
 
-	if offset != len(data) { return fmt.Errorf("extra data after D1Array unmarshal") }
-	if d.size != d.bv.Size() { return fmt.Errorf("D1Array size mismatch after unmarshal") }
+	if offset != len(data) {
+		return fmt.Errorf("extra data after D1Array unmarshal")
+	}
+	if d.size != d.bv.Size() {
+		return fmt.Errorf("D1Array size mismatch after unmarshal")
+	}
 
 	return nil
 }
