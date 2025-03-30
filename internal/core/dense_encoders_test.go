@@ -54,15 +54,16 @@ func TestDenseMonoAccess(t *testing.T) {
 }
 
 func TestDenseMonoSerialization(t *testing.T) {
-	type E = RiceEncoder // Use Rice as underlying for test
-	dm1 := DenseMono[*E]{}
+	type E = *RiceEncoder // Use pointer type for Rice
+	dm1 := DenseMono[E]{}
 	// Simulate encoding
 	dm1.NumPartitions = 5
 	pilots := make([]uint64, 5*3) // 5 partitions, 3 buckets
 	for i := range pilots {
 		pilots[i] = uint64(i * 10)
 	}
-	dm1.Encoder = &E{} // Allocate pointer
+	dm1.Encoder = &RiceEncoder{} // Allocate the actual RiceEncoder
+
 	err := dm1.Encoder.Encode(pilots)
 	if err != nil {
 		if IsD1ArraySelectStubbed() {
@@ -77,7 +78,7 @@ func TestDenseMonoSerialization(t *testing.T) {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 
-	dm2 := DenseMono[*E]{}
+	dm2 := DenseMono[E]{}
 	err = dm2.UnmarshalBinary(data)
 	if err != nil {
 		if IsD1ArraySelectStubbed() {
@@ -105,9 +106,9 @@ func TestDenseInterleavedAccess(t *testing.T) {
 	numPartitions := uint64(10)
 	numBuckets := uint64(5)
 
-	var denseEnc DenseInterleaved[*MockEncoder]
-	// E is *MockEncoder, so []*E is []**MockEncoder
-	denseEnc.Encoders = make([]**MockEncoder, numBuckets)
+	type E = *MockEncoder // Use pointer type
+	var denseEnc DenseInterleaved[E]
+	denseEnc.Encoders = make([]E, numBuckets) // Slice of E (*MockEncoder)
 
 	// Create and encode data for each bucket's encoder separately
 	for b := uint64(0); b < numBuckets; b++ {
@@ -116,14 +117,12 @@ func TestDenseInterleavedAccess(t *testing.T) {
 			// Assign unique value (same formula as Mono for comparison)
 			bucketPilots[p] = 1000*b + p
 		}
-		// encoderPtr is *MockEncoder
-		var encoderPtr *MockEncoder = &MockEncoder{}
-		err := encoderPtr.Encode(bucketPilots)
+		encoder := &MockEncoder{} // Allocate the encoder
+		err := encoder.Encode(bucketPilots)
 		if err != nil {
 			t.Fatalf("MockEncoder Encode for bucket %d failed: %v", b, err)
 		}
-		// Assign the address of the pointer to the slice element (**MockEncoder)
-		denseEnc.Encoders[b] = &encoderPtr
+		denseEnc.Encoders[b] = encoder // Store pointer directly
 	}
 
 	// Verify AccessDense maps correctly to the right encoder and index within it
@@ -139,23 +138,23 @@ func TestDenseInterleavedAccess(t *testing.T) {
 }
 
 func TestDenseInterleavedSerialization(t *testing.T) {
-	type E = CompactEncoder // Use Compact as underlying
-	di1 := DenseInterleaved[*E]{}
+	type E = *CompactEncoder // Use pointer type for Compact
+	di1 := DenseInterleaved[E]{}
 	// Simulate encoding
 	numBuckets := 3
 	numParts := 4
-	di1.Encoders = make([]**E, numBuckets) // Slice of pointers to pointers
+	di1.Encoders = make([]E, numBuckets) // Slice of E (*CompactEncoder)
 	for b := 0; b < numBuckets; b++ {
 		pilots := make([]uint64, numParts)
 		for p := 0; p < numParts; p++ {
 			pilots[p] = uint64(b*100 + p)
 		}
-		encoderPtr := &E{} // Allocate the encoder
-		err := encoderPtr.Encode(pilots)
+		encoder := &CompactEncoder{} // Allocate the encoder
+		err := encoder.Encode(pilots)
 		if err != nil {
 			t.Fatalf("Encode failed: %v", err)
 		}
-		di1.Encoders[b] = &encoderPtr // Store address of pointer
+		di1.Encoders[b] = encoder // Store the pointer (*CompactEncoder)
 	}
 
 	data, err := di1.MarshalBinary()
@@ -163,7 +162,7 @@ func TestDenseInterleavedSerialization(t *testing.T) {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 
-	di2 := DenseInterleaved[*E]{}
+	di2 := DenseInterleaved[E]{}
 	err = di2.UnmarshalBinary(data)
 	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
@@ -173,11 +172,13 @@ func TestDenseInterleavedSerialization(t *testing.T) {
 		t.Fatalf("Number of encoders mismatch: %d != %d", len(di1.Encoders), len(di2.Encoders))
 	}
 	for b := 0; b < len(di1.Encoders); b++ {
-		if di1.Encoders[b] == nil || di2.Encoders[b] == nil || *di1.Encoders[b] == nil || *di2.Encoders[b] == nil {
+		// Check if pointers are nil
+		if di1.Encoders[b] == nil || di2.Encoders[b] == nil {
 			t.Fatalf("Encoder %d is nil after unmarshal", b)
 		}
-		enc1 := *di1.Encoders[b]
-		enc2 := *di2.Encoders[b]
+		// Both are non-nil, compare underlying encoders
+		enc1 := di1.Encoders[b]
+		enc2 := di2.Encoders[b]
 		if enc1.Size() != enc2.Size() {
 			t.Errorf("Encoder %d size mismatch: %d != %d", b, enc1.Size(), enc2.Size())
 		}

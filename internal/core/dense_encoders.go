@@ -101,7 +101,8 @@ func (dm *DenseMono[E]) AccessDense(partition uint64, bucket uint64) uint64 {
 	return dm.Encoder.Access(idx)
 }
 func (dm *DenseMono[E]) MarshalBinary() ([]byte, error) {
-	encData, err := serial.TryMarshal(&dm.Encoder) // Marshal pointer if E is pointer type
+	// Marshal the Encoder field itself (pass address for consistency)
+	encData, err := serial.TryMarshal(&dm.Encoder)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal underlying encoder: %w", err)
 	}
@@ -132,13 +133,23 @@ func (dm *DenseMono[E]) UnmarshalBinary(data []byte) error {
 	if uint64(offset)+encLen > uint64(len(data)) {
 		return io.ErrUnexpectedEOF
 	}
-	// Create zero value encoder and unmarshal into it
-	var encoder E
-	err := serial.TryUnmarshal(&encoder, data[offset:offset+int(encLen)])
+
+	// Handle allocation if E is a pointer type and is currently nil
+	var zeroE E
+	typeE := reflect.TypeOf(zeroE)
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		if reflect.ValueOf(dm.Encoder).IsNil() { // Check if pointer field is nil
+			elemType := typeE.Elem()
+			newInstance := reflect.New(elemType)
+			dm.Encoder = newInstance.Interface().(E)
+		}
+	}
+	
+	// Now unmarshal into the address of dm.Encoder
+	err := serial.TryUnmarshal(&dm.Encoder, data[offset:offset+int(encLen)])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal underlying encoder: %w", err)
 	}
-	dm.Encoder = encoder
 	offset += int(encLen)
 	if offset != len(data) {
 		return fmt.Errorf("extra data after DenseMono unmarshal")
@@ -150,31 +161,37 @@ func (dm *DenseMono[E]) UnmarshalBinary(data []byte) error {
 
 // DenseInterleaved uses a separate encoder E for each bucket index.
 type DenseInterleaved[E Encoder] struct {
-	Encoders []*E // Store pointers to encoders
+	Encoders []E // Store E directly (could be values or pointers)
 }
 
 func (di *DenseInterleaved[E]) Name() string { var zeroE E; return "inter-" + zeroE.Name() }
 
 func (di *DenseInterleaved[E]) Size() uint64 {
 	// Total size is sum of sizes? Or just total elements? Let's use total elements.
-	if len(di.Encoders) == 0 || di.Encoders[0] == nil { // Add nil check for first element
+	if len(di.Encoders) == 0 {
 		return 0
 	}
-	// return di.Encoders[0].Size() * uint64(len(di.Encoders)) // Assumes all sub-encoders have same Size (NumPartitions)
-	// CHANGE: Dereference the pointer before calling Size()
-	return (*di.Encoders[0]).Size() * uint64(len(di.Encoders))
+	
+	// Check if E is a pointer type and the first element is nil
+	typeE := reflect.TypeOf(di.Encoders[0])
+	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(di.Encoders[0]).IsNil() {
+		return 0
+	}
+	
+	return di.Encoders[0].Size() * uint64(len(di.Encoders)) // Assumes all sub-encoders have same Size
 }
 
-// CHANGE THIS METHOD (NumBits):
 func (di *DenseInterleaved[E]) NumBits() uint64 {
 	bits := uint64(0)
-	for _, encPtr := range di.Encoders { // Renamed loop variable for clarity
-		if encPtr != nil { // Add nil check for safety
-			// bits += enc.NumBits()
-			bits += (*encPtr).NumBits() // CHANGE: Dereference pointer before calling NumBits
+	for _, enc := range di.Encoders {
+		// Check if E is a pointer type and this element is nil
+		typeE := reflect.TypeOf(enc)
+		if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(enc).IsNil() {
+			continue // Skip nil pointers
 		}
+		bits += enc.NumBits()
 	}
-	return bits // Add slice overhead? Minimal compared to data.
+	return bits
 }
 func (di *DenseInterleaved[E]) Encode(pilots []uint64) error {
 	return fmt.Errorf("DenseInterleaved.Encode not implemented; use EncodeDense")
@@ -184,7 +201,7 @@ func (di *DenseInterleaved[E]) Access(i uint64) uint64 {
 }
 
 func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions uint64, numBucketsPerPartition uint64, numThreads int) error {
-	di.Encoders = make([]*E, numBucketsPerPartition) // Slice of pointers
+	di.Encoders = make([]E, numBucketsPerPartition) // Slice of E (value or pointer type)
 	totalPilots := numPartitions * numBucketsPerPartition
 	allPilots := make([]uint64, 0, totalPilots)
 	for iterator.HasNext() {
@@ -201,14 +218,22 @@ func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions
 				idx := b*numPartitions + p
 				pilotsForBucket[p] = allPilots[idx]
 			}
-			// Create a pointer to a new zero value
-			encoderPtr := new(E)
-			// Need to call Encode on the pointer receiver
-			err := (*encoderPtr).Encode(pilotsForBucket)
+			
+			// Initialize the encoder based on whether E is a pointer type
+			var zeroE E
+			typeE := reflect.TypeOf(zeroE)
+			if typeE != nil && typeE.Kind() == reflect.Ptr {
+				// E is a pointer type, allocate a new instance
+				elemType := typeE.Elem()
+				newInstance := reflect.New(elemType).Interface().(E)
+				di.Encoders[b] = newInstance
+			}
+			
+			// Call Encode on the encoder (value or pointer)
+			err := di.Encoders[b].Encode(pilotsForBucket)
 			if err != nil {
 				return fmt.Errorf("encoding bucket %d failed: %w", b, err)
 			}
-			di.Encoders[b] = encoderPtr // Store the pointer
 		}
 		return nil
 	}
@@ -243,22 +268,25 @@ func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions
 }
 
 func (di *DenseInterleaved[E]) AccessDense(partition uint64, bucket uint64) uint64 {
-	if bucket >= uint64(len(di.Encoders)) || di.Encoders[bucket] == nil {
-		panic(fmt.Sprintf("DenseInterleaved.AccessDense: bucket index %d out of bounds or nil encoder (%d)", bucket, len(di.Encoders)))
+	if bucket >= uint64(len(di.Encoders)) {
+		panic(fmt.Sprintf("DenseInterleaved.AccessDense: bucket index %d out of bounds (%d)", bucket, len(di.Encoders)))
 	}
-	return (*di.Encoders[bucket]).Access(partition) // Access via pointer
+	
+	// Check if E is a pointer type and the element is nil
+	typeE := reflect.TypeOf(di.Encoders[bucket])
+	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(di.Encoders[bucket]).IsNil() {
+		panic(fmt.Sprintf("DenseInterleaved.AccessDense: encoder for bucket %d is nil", bucket))
+	}
+	
+	return di.Encoders[bucket].Access(partition)
 }
 func (di *DenseInterleaved[E]) MarshalBinary() ([]byte, error) {
 	numEncoders := uint64(len(di.Encoders))
 	encodedData := make([][]byte, numEncoders)
 	totalDataLen := 0
-	for i, encPtr := range di.Encoders {
-		if encPtr == nil {
-			// Handle nil pointers - serialize as zero length
-			encodedData[i] = []byte{}
-			continue
-		}
-		data, err := serial.TryMarshal(encPtr) // Marshal the pointer itself
+	for i, enc := range di.Encoders {
+		// Marshal the encoder itself (pass address)
+		data, err := serial.TryMarshal(&enc) // Pass address of slice element
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal encoder %d: %w", i, err)
 		}
@@ -289,7 +317,7 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 	offset := 0
 	numEncoders := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
-	di.Encoders = make([]*E, numEncoders) // Slice of pointers
+	di.Encoders = make([]E, numEncoders) // Slice of E (value or pointer type)
 	for i := uint64(0); i < numEncoders; i++ {
 		if offset+8 > len(data) {
 			return io.ErrUnexpectedEOF
@@ -299,18 +327,21 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 		if uint64(offset)+encLen > uint64(len(data)) {
 			return io.ErrUnexpectedEOF
 		}
-		// Skip empty encoders (nil pointers)
-		if encLen == 0 {
-			di.Encoders[i] = nil
-			continue
+		
+		// Handle pointer allocation if E is a pointer type
+		var zeroE E
+		typeE := reflect.TypeOf(zeroE)
+		if typeE != nil && typeE.Kind() == reflect.Ptr {
+			elemType := typeE.Elem()
+			newInstance := reflect.New(elemType)
+			di.Encoders[i] = newInstance.Interface().(E)
 		}
-		// Create zero value pointer and unmarshal into it
-		encoderPtr := new(E)
-		err := serial.TryUnmarshal(encoderPtr, data[offset:offset+int(encLen)])
+		
+		// Unmarshal into the address of the (potentially newly allocated) element
+		err := serial.TryUnmarshal(&di.Encoders[i], data[offset:offset+int(encLen)])
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal encoder %d: %w", i, err)
 		}
-		di.Encoders[i] = encoderPtr // Assign pointer
 		offset += int(encLen)
 	}
 	if offset != len(data) {
@@ -322,11 +353,9 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 // --- DiffEncoder ---
 
 // DiffEncoder encodes differences between consecutive elements.
-// Stores a pointer to the underlying encoder instance E.
 type DiffEncoder[E Encoder] struct {
 	Increment uint64
-	// Encoder   E // OLD: Stores the value/pointer directly
-	encoderPtr *E // CHANGE: Always store a pointer to the encoder instance E
+	Encoder   E // Store E directly (could be value or pointer type)
 }
 
 func (de *DiffEncoder[E]) Name() string {
@@ -349,53 +378,20 @@ func (de *DiffEncoder[E]) Encode(values []uint64, increment uint64) error {
 	de.Increment = increment
 	n := uint64(len(values))
 
-	// --- Ensure encoderPtr points to a valid instance ---
-	if de.encoderPtr == nil {
-		// We need to create a new zero value of type E and make encoderPtr point to it.
-		// This works whether E is MyStruct or *MyStruct. If E is *MyStruct,
-		// we create a pointer to a nil pointer, which is not what we want.
-		// We need a pointer to an *allocated* E.
-
-		// Let's use reflection again, but applied correctly to initialize de.encoderPtr.
-		var zeroE E
-		typeE := reflect.TypeOf(zeroE) // Get type E
-
-		// Handle nil interface type explicitly
-		if typeE == nil {
-			return fmt.Errorf("cannot encode with nil encoder type E")
-		}
-
-		// Create a new instance of type E (value receiver friendly) or *E (pointer receiver friendly)
-		// reflect.New(typeE) always returns a *T where T is the type passed.
-		// If E is MyStruct, typeE is MyStruct, New returns *MyStruct.
-		// If E is *MyStruct, typeE is *MyStruct, New returns **MyStruct. Not useful.
-
-		// Let's allocate based on whether E itself is a pointer.
-		var newInstance reflect.Value
-		if typeE.Kind() == reflect.Ptr {
-			// E is a pointer type (e.g., *MyStruct). Need to create the underlying type (MyStruct).
-			elemType := typeE.Elem()
-			newInstance := reflect.New(elemType) // Creates *MyStruct (as reflect.Value of type *MyStruct)
-			// de.encoderPtr needs to be **MyStruct.
-			// We need a pointer to the pointer created above.
-			// Create a variable to hold the pointer, then take its address.
-			ptrVal := newInstance.Interface().(E) // ptrVal is type E (*MyStruct)
-			de.encoderPtr = &ptrVal               // Assign the address of ptrVal to de.encoderPtr (**MyStruct)
-		} else {
-			// E is a value type (e.g., MyStruct). Need to create a pointer to it.
-			newInstance = reflect.New(typeE) // Creates *MyStruct (as reflect.Value of type *MyStruct)
-			// de.encoderPtr needs to be *MyStruct.
-			// newInstance already holds the *MyStruct we need.
-			// Assert the interface value to the correct pointer type (*E = *MyStruct).
-			de.encoderPtr = newInstance.Interface().(*E)
-		}
+	// --- Ensure Encoder is initialized if it's a pointer type ---
+	var zeroE E
+	typeE := reflect.TypeOf(zeroE)
+	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(de.Encoder).IsNil() {
+		// E is a pointer type and it's nil - allocate it
+		elemType := typeE.Elem()
+		newInstance := reflect.New(elemType).Interface().(E)
+		de.Encoder = newInstance
 	}
-	// Now de.encoderPtr is guaranteed to be non-nil and point to a valid E instance (or a pointer to it).
 
-	// Proceed with encoding, calling methods on the pointed-to instance
+	// Proceed with encoding
 	if n == 0 {
 		// Ensure Encode is called even for empty input, allowing initialization
-		return (*de.encoderPtr).Encode([]uint64{})
+		return de.Encoder.Encode([]uint64{})
 	}
 
 	diffValues := make([]uint64, n)
@@ -413,16 +409,18 @@ func (de *DiffEncoder[E]) Encode(values []uint64, increment uint64) error {
 		diffValues[i] = (absToEncode << 1) | signBit
 		expected += int64(increment)
 	}
-	// Call Encode on the instance pointed to by encoderPtr
-	return (*de.encoderPtr).Encode(diffValues)
+	// Call Encode directly on the Encoder field
+	return de.Encoder.Encode(diffValues)
 }
 
 func (de *DiffEncoder[E]) Access(i uint64) uint64 {
-	if de.encoderPtr == nil {
-		panic("DiffEncoder.Access called before Encode or on nil encoder")
+	// Check if Encoder is nil (only possible if E is a pointer type)
+	typeE := reflect.TypeOf(de.Encoder)
+	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(de.Encoder).IsNil() {
+		panic("DiffEncoder.Access called on nil encoder")
 	}
-	// Call Access on the instance pointed to by encoderPtr
-	encodedDiff := (*de.encoderPtr).Access(i)
+	// Call Access directly on the Encoder field
+	encodedDiff := de.Encoder.Access(i)
 
 	// Decode the difference
 	expected := int64(i * de.Increment)
@@ -437,35 +435,29 @@ func (de *DiffEncoder[E]) Access(i uint64) uint64 {
 }
 
 func (de *DiffEncoder[E]) Size() uint64 {
-	if de.encoderPtr == nil {
+	typeE := reflect.TypeOf(de.Encoder)
+	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(de.Encoder).IsNil() {
 		return 0
 	}
-	// Call Size on the instance pointed to by encoderPtr
-	return (*de.encoderPtr).Size()
+	return de.Encoder.Size()
 }
 
 func (de *DiffEncoder[E]) NumBits() uint64 {
-	bits := uint64(8 * 8) // Increment size in bits
-	if de.encoderPtr != nil {
-		// Call NumBits on the instance pointed to by encoderPtr
-		bits += (*de.encoderPtr).NumBits()
+	bits := uint64(8 * 8) // Increment size
+	typeE := reflect.TypeOf(de.Encoder)
+	if !(typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(de.Encoder).IsNil()) {
+		bits += de.Encoder.NumBits()
 	}
 	return bits
 }
 
 func (de *DiffEncoder[E]) MarshalBinary() ([]byte, error) {
-	var encData []byte
-	var err error
-	if de.encoderPtr == nil {
-		encData = []byte{} // Marshal nil encoder as empty data slice
-	} else {
-		// Marshal the pointer (*E) which should point to the actual encoder instance
-		encData, err = serial.TryMarshal(de.encoderPtr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal underlying encoder pointed to by encoderPtr: %w", err)
-		}
+	// Marshal the Encoder field itself (pass address)
+	encData, err := serial.TryMarshal(&de.Encoder) // Pass address
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal underlying encoder: %w", err)
 	}
-
+	
 	// Prepare buffer: Increment + Encoder Data Length + Encoder Data
 	totalSize := 8 + 8 + len(encData)
 	buf := make([]byte, totalSize)
@@ -478,65 +470,46 @@ func (de *DiffEncoder[E]) MarshalBinary() ([]byte, error) {
 	offset += len(encData)
 
 	if offset != totalSize {
-		// This should not happen if logic is correct
-		return nil, fmt.Errorf("internal error: DiffEncoder marshal size mismatch, expected %d, wrote %d", totalSize, offset)
+		return nil, fmt.Errorf("DiffEncoder marshal size mismatch")
 	}
 	return buf, nil
 }
 
 func (de *DiffEncoder[E]) UnmarshalBinary(data []byte) error {
 	if len(data) < 16 {
-		return fmt.Errorf("cannot unmarshal DiffEncoder, data too short (%d bytes, need at least 16)", len(data))
+		return io.ErrUnexpectedEOF
 	}
 	offset := 0
 	de.Increment = binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 	encLen := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
-
 	expectedEndOffset := offset + int(encLen)
 	if uint64(expectedEndOffset) > uint64(len(data)) {
-		return fmt.Errorf("cannot unmarshal DiffEncoder, underlying encoder data length (%d) exceeds available data (%d)", encLen, len(data)-offset)
+		return io.ErrUnexpectedEOF
 	}
 
-	encoderData := data[offset:expectedEndOffset]
-
-	if encLen == 0 {
-		// Data represents a nil/zero encoder. Set de.encoderPtr to nil.
-		de.encoderPtr = nil
-	} else {
-		// We have data to unmarshal. Allocate a new E instance and make encoderPtr point to it.
-		var zeroE E
-		typeE := reflect.TypeOf(zeroE)
-		if typeE == nil {
-			return fmt.Errorf("cannot unmarshal DiffEncoder into nil interface type E with non-empty data")
-		}
-
-		var newInstance reflect.Value
-		if typeE.Kind() == reflect.Ptr {
+	// Handle pointer allocation if E is a pointer type
+	var zeroE E
+	typeE := reflect.TypeOf(zeroE)
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		if reflect.ValueOf(de.Encoder).IsNil() { // Check if pointer field is nil
 			elemType := typeE.Elem()
-			newInstance := reflect.New(elemType) // Allocates *elemType (e.g. *MyStruct)
-			// Assign the address of the allocated pointer (*elemType) to de.encoderPtr (**MyStruct).
-			ptrVal := newInstance.Interface().(E) // ptrVal is type E (*MyStruct)
-			de.encoderPtr = &ptrVal               // Assign &ptrVal (**MyStruct) to de.encoderPtr (**MyStruct)
-		} else {
-			newInstance = reflect.New(typeE) // Allocates *valueType (e.g. *MyStruct)
-			// Assign the allocated pointer (*valueType) to de.encoderPtr (*MyStruct).
-			de.encoderPtr = newInstance.Interface().(*E)
-		}
-
-		// Unmarshal into the object pointed to by de.encoderPtr
-		err := serial.TryUnmarshal(de.encoderPtr, encoderData)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal underlying encoder pointed to by encoderPtr: %w", err)
+			newInstance := reflect.New(elemType)
+			de.Encoder = newInstance.Interface().(E)
 		}
 	}
-
-	// Check if we consumed exactly the expected data length overall
-	if expectedEndOffset != len(data) {
-		return fmt.Errorf("warning: extra data (%d bytes) after unmarshaling DiffEncoder", len(data)-expectedEndOffset)
+	
+	// Now unmarshal into the address of Encoder
+	err := serial.TryUnmarshal(&de.Encoder, data[offset:expectedEndOffset])
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal underlying encoder: %w", err)
 	}
-
+	
+	offset = expectedEndOffset
+	if offset != len(data) {
+		return fmt.Errorf("extra data after DiffEncoder unmarshal")
+	}
 	return nil
 }
 
