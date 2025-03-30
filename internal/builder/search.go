@@ -421,6 +421,9 @@ func searchSequentialAdd(
 	d32 := uint32(tableSize) // Precompute for modulo
 
 	processedBuckets := uint64(0)
+	searchStartTime := time.Now()
+	log.Printf("Starting searchSequentialAdd: numKeys=%d, numBuckets=%d, tableSize=%d",
+		numKeys, numBuckets, tableSize)
 
 	for bucketsIt.HasNext() {
 		bucket := bucketsIt.Next()
@@ -431,15 +434,32 @@ func searchSequentialAdd(
 		bucketID := bucket.ID()
 		payloads := bucket.Payloads() // These are hash.Second() values
 
+		bucketStartTime := time.Now()
+		log.Printf("Processing bucket %d of %d (%v elapsed since search start)",
+			processedBuckets+1, numNonEmptyBuckets, time.Since(searchStartTime))
+
 		foundPilot := false
-		for pilot := uint64(0); ; pilot++ { // Infinite loop until pilot found (or seed error)
+		pilotSearchStartTime := time.Now()
+
+		for pilot := uint64(0); pilot < maxPilotAttempts; pilot++ {
+			// Log progress every 100,000 iterations
+			if pilot > 0 && pilot%100000 == 0 {
+				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v",
+					bucketID, bucketSize, pilot, time.Since(pilotSearchStartTime))
+				log.Printf("Payloads: %v", payloads)
+			}
 
 			s := core.FastDivU32(uint32(pilot), m64) // Calculate s = pilot / tableSize (approx)
 
 			positions = positions[:0] // Clear slice
 			collisionFound := false
 
-			for _, pld := range payloads {
+			// For extensive debugging when stuck
+			if pilot > 0 && pilot%1000000 == 0 { // Log details once per million attempts
+				log.Printf("Detail for bucket %d (pilot=%d): tableSize=%d", bucketID, pilot, tableSize)
+			}
+
+			for i, pld := range payloads {
 				hashSecond := pld
 				// Calculate position: fastmod_u32(((mix(h2+s)) >> 33) + pilot, M, d)
 				valToMix := hashSecond + uint64(s)
@@ -448,8 +468,17 @@ func searchSequentialAdd(
 				sum := term1 + pilot // Add full pilot
 				p := uint64(core.FastModU32(uint32(sum), m64, d32))
 
+				// Log detailed collision info occasionally
+				if pilot > 0 && pilot%1000000 == 0 {
+					log.Printf("  Payload[%d]=%d, MixShift=%d, Sum=%d, Position=%d, Taken=%v",
+						i, pld, term1, sum, p, taken.Get(p))
+				}
+
 				// Check collision with taken bits
 				if taken.Get(p) {
+					if pilot > 0 && pilot%1000000 == 0 {
+						log.Printf("  Collision at position %d for payload %d", p, pld)
+					}
 					collisionFound = true
 					break
 				}
@@ -465,6 +494,9 @@ func searchSequentialAdd(
 			inBucketCollision := false
 			for i := 1; i < len(positions); i++ {
 				if positions[i] == positions[i-1] {
+					if pilot > 0 && pilot%1000000 == 0 {
+						log.Printf("  In-bucket collision: position %d appears multiple times", positions[i])
+					}
 					inBucketCollision = true
 					break
 				}
@@ -475,6 +507,9 @@ func searchSequentialAdd(
 
 			// Pilot found!
 			pilots.EmplaceBack(bucketID, pilot)
+			log.Printf("Found pilot %d for bucket %d after %v",
+				pilot, bucketID, time.Since(bucketStartTime))
+
 			for _, p := range positions {
 				taken.Set(p) // Mark slots as taken
 			}
@@ -484,7 +519,7 @@ func searchSequentialAdd(
 		} // End pilot search loop
 
 		if !foundPilot {
-			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d (ADD)", bucketID)}
+			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d (ADD) after %d attempts", bucketID, maxPilotAttempts)}
 		}
 		processedBuckets++
 	} // End bucket iteration
