@@ -2,11 +2,12 @@
 
 # Script to list all failing tests in the project
 # Usage: ./scripts/list_failing_tests.sh [package_pattern]
+# Tests are run with race detection enabled
 
 # Set default package pattern if not provided
 PACKAGE_PATTERN=${1:-"./..."}
 
-echo "Running tests for pattern: $PACKAGE_PATTERN with 30s timeout"
+echo "Running tests for pattern: $PACKAGE_PATTERN with 30s timeout and race detection"
 echo "======================="
 
 # Run tests and capture output
@@ -23,7 +24,7 @@ PANIC_COUNT=0
 
 # Use tee to display output in real-time while also capturing it
 echo "Starting tests..."
-TEST_OUTPUT=$(go test $PACKAGE_PATTERN -v -timeout 30s 2>&1 | tee /dev/tty)
+TEST_OUTPUT=$(go test $PACKAGE_PATTERN -v -timeout 30s -race 2>&1 | tee /dev/tty)
 
 # Count passing tests
 PASS_COUNT=$(echo "$TEST_OUTPUT" | grep "^--- PASS" | wc -l)
@@ -166,7 +167,7 @@ if [ -s "$TEMP_FILE" ]; then
         echo "======================="
         echo "Command to reproduce all failures (including panics):"
         # Print without wrapping to make it easy to copy
-        COMMAND="go test -v $PACKAGE_PATTERN -run=\"$TEST_REGEX\" -timeout 30s"
+        COMMAND="go test -v $PACKAGE_PATTERN -run=\"$TEST_REGEX\" -timeout 30s -race"
         printf "%s\n" "$COMMAND"
     fi
 # If no specific tests were identified but we had panics, suggest running the whole package
@@ -174,7 +175,7 @@ elif [ "$PANIC_COUNT" -gt 0 ]; then
     echo "======================="
     echo "Command to reproduce all failures (including panics):"
     # Print without wrapping to make it easy to copy
-    printf "go test -v $PACKAGE_PATTERN -timeout 30s\n"
+    printf "go test -v $PACKAGE_PATTERN -timeout 30s -race\n"
 fi
 
 # Print summary

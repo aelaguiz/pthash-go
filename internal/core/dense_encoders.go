@@ -138,20 +138,22 @@ func (dm *DenseMono[E]) UnmarshalBinary(data []byte) error {
 	// Handle allocation if E is a pointer type and is currently nil
 	var zeroE E
 	typeE := reflect.TypeOf(zeroE)
-	targetPtr := &dm.Encoder // Default: address for value types
-	
+	targetPtr := interface{}(nil) // Initialize target for TryUnmarshal
+
 	if typeE != nil && typeE.Kind() == reflect.Ptr {
 		// E is a pointer type
 		encoderValue := reflect.ValueOf(&dm.Encoder).Elem() // Get settable Value of dm.Encoder
-		if encoderValue.IsNil() { // Check if pointer field is nil
-			elemType := typeE.Elem()                 // Get underlying type
-			newInstance := reflect.New(elemType)     // Create new instance as reflect.Value
-			encoderValue.Set(newInstance)            // Use reflection to set the field
+		if encoderValue.IsNil() {                           // Check if pointer field is nil
+			elemType := typeE.Elem()             // Get underlying type
+			newInstance := reflect.New(elemType) // Create new instance as reflect.Value
+			encoderValue.Set(newInstance)        // Use reflection to set the field
 		}
 		// For pointer types, TryUnmarshal needs the pointer itself
 		targetPtr = dm.Encoder // Pass the pointer directly
+	} else {
+		targetPtr = &dm.Encoder
 	}
-	
+
 	// Now unmarshal into the correct target
 	err := serial.TryUnmarshal(targetPtr, data[offset:offset+int(encLen)])
 	if err != nil {
@@ -327,6 +329,9 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 	offset += 8
 	di.Encoders = make([]E, numEncoders) // Slice of E (value or pointer type)
 	for i := uint64(0); i < numEncoders; i++ {
+		targetPtr := interface{}(nil)
+		elemValue := reflect.Value{} // Declare outside if block
+
 		if offset+8 > len(data) {
 			return io.ErrUnexpectedEOF
 		}
@@ -339,18 +344,17 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 		// Handle pointer allocation if E is a pointer type
 		var zeroE E
 		typeE := reflect.TypeOf(zeroE)
-		targetPtr := &di.Encoders[i] // Default: address for value types
-		
+
 		if typeE != nil && typeE.Kind() == reflect.Ptr {
 			// E is a pointer type
 			// Get a settable reflect.Value for the slice element
 			encodersValue := reflect.ValueOf(&di.Encoders).Elem() // Get slice as reflect.Value
-			elemValue := encodersValue.Index(int(i))              // Get element i as reflect.Value
-			
-			elemType := typeE.Elem()                 // Get underlying type
-			newInstance := reflect.New(elemType)     // Create new instance
-			elemValue.Set(newInstance)               // Set the slice element to the new instance
-			
+			elemValue = encodersValue.Index(int(i))               // Get element i as reflect.Value
+
+			elemType := typeE.Elem()             // Get underlying type
+			newInstance := reflect.New(elemType) // Create new instance
+			elemValue.Set(newInstance)           // Set the slice element to the new instance
+
 			// For pointer types, pass the pointer itself to TryUnmarshal
 			targetPtr = di.Encoders[i]
 		}
@@ -511,18 +515,20 @@ func (de *DiffEncoder[E]) UnmarshalBinary(data []byte) error {
 	// Handle pointer allocation if E is a pointer type
 	var zeroE E
 	typeE := reflect.TypeOf(zeroE)
-	targetPtr := &de.Encoder // Default: address for value types
-	
+	targetPtr := interface{}(nil) // Initialize target for TryUnmarshal
+
 	if typeE != nil && typeE.Kind() == reflect.Ptr {
 		// E is a pointer type
 		encoderValue := reflect.ValueOf(&de.Encoder).Elem() // Get settable Value of de.Encoder
-		if encoderValue.IsNil() { // Check if pointer field is nil
-			elemType := typeE.Elem()                 // Get underlying type
-			newInstance := reflect.New(elemType)     // Create new instance as reflect.Value
-			encoderValue.Set(newInstance)            // Use reflection to set the field
+		if encoderValue.IsNil() {                           // Check if pointer field is nil
+			elemType := typeE.Elem()             // Get underlying type
+			newInstance := reflect.New(elemType) // Create new instance as reflect.Value
+			encoderValue.Set(newInstance)        // Use reflection to set the field
 		}
 		// For pointer types, TryUnmarshal needs the pointer itself
 		targetPtr = de.Encoder // Pass the pointer directly
+	} else {
+		targetPtr = &de.Encoder
 	}
 
 	// Now unmarshal into the correct target
