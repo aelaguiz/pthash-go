@@ -167,20 +167,46 @@ type RangeBucketer struct {
 
 // Init initializes the RangeBucketer. Ignores lambda, tableSize, alpha.
 func (b *RangeBucketer) Init(numBuckets uint64, lambda float64, tableSize uint64, alpha float64) error {
-	// This method satisfies the Bucketer interface
+	// RangeBucketer only needs numBuckets
+	if numBuckets > uint64(MaxBucketID) {
+		// Add a check here because the Bucket method now returns BucketIDType
+		// If we allow more partitions than MaxBucketID, the Bucket method's cast
+		// would truncate the partition index, leading to incorrect partitioning.
+		// This check prevents that specific issue.
+		return fmt.Errorf("RangeBucketer: number of partitions (%d) exceeds limit for BucketIDType (%d)", numBuckets, MaxBucketID)
+	}
 	b.numBuckets = numBuckets
 	return nil
 }
 
+// internal/core/bucketer.go
+
 // Bucket calculates partition = ((hash >> 32U) * m_num_buckets) >> 32U;
-func (b *RangeBucketer) Bucket(hash uint64) uint64 { // Note: returns uint64 partition ID
+// Corrected Implementation
+func (b *RangeBucketer) Bucket(hash uint64) BucketIDType {
 	if b.numBuckets == 0 {
-		return 0
+		return BucketIDType(0)
 	}
-	hi := hash >> 32
-	// Calculate (hi * numBuckets) >> 32 using 128-bit intermediate product
-	prodHi, _ := bits.Mul64(hi, b.numBuckets)
-	return prodHi
+	// 1. Get high 32 bits of hash
+	hi32 := uint32(hash >> 32)
+
+	// 2. Multiply hi32 (as uint64) by numBuckets (uint64), get 128-bit result
+	productHi, productLo := bits.Mul64(uint64(hi32), b.numBuckets)
+
+	// 3. Shift the 128-bit result right by 32 bits.
+	// Result = (productHi << 32) | (productLo >> 32)
+	result := (productHi << 32) | (productLo >> 32)
+
+	// 4. Cast to BucketIDType (uint32)
+	// Check if result exceeds MaxBucketID before casting
+	if result > uint64(MaxBucketID) {
+		// This implies numPartitions *might* be too large for BucketIDType,
+		// although the Init check should prevent this specific RangeBucketer case.
+		// It's safer to clamp or panic if this occurs unexpectedly.
+		// Let's clamp to the maximum possible BucketIDType value.
+		return MaxBucketID
+	}
+	return BucketIDType(result)
 }
 
 // NumBuckets returns the total number of partitions.

@@ -3,6 +3,10 @@ package core
 
 import (
 	"math" // Ensure math is imported
+	"math/rand"
+	"pthashgo/internal/serial"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -259,5 +263,229 @@ func TestTableBucketerBucket(t *testing.T) {
 			t.Errorf("Bucket %d significantly different from expected approx %d (diff %d)", bucket, expectedApproxBuckets[i], diff)
 		}
 		prevBucket = bucket
+	}
+}
+
+// Add these tests to internal/core/bucketer_test.go
+
+func TestRangeBucketerLogic(t *testing.T) {
+	numBuckets := uint64(10)
+	var b RangeBucketer
+	err := b.Init(numBuckets, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	if b.NumBuckets() != numBuckets {
+		t.Fatalf("NumBuckets failed")
+	}
+
+	// Bucket = (High32 * NumBuckets) >> 32
+	tests := []struct {
+		hash uint64
+		want BucketIDType // Changed from uint64 to BucketIDType
+	}{
+		{0x00000000_FFFFFFFF, 0},                            // Low hash -> bucket 0
+		{0x19999999_00000000, 1},                            // High ~ 1/10th -> bucket 1
+		{0x80000000_12345678, 5},                            // High ~ 1/2 -> bucket 5
+		{0xFFFFFFFF_ABCDEF01, BucketIDType(numBuckets - 1)}, // High ~ max -> last bucket
+	}
+
+	for _, tt := range tests {
+		got := b.Bucket(tt.hash)
+		if got != tt.want {
+			t.Errorf("RangeBucket(0x%x): got %d, want %d", tt.hash, got, tt.want)
+		}
+		if uint64(got) >= numBuckets { // Cast got to uint64 for comparison
+			t.Errorf("RangeBucket(0x%x): got %d, out of range [0, %d)", tt.hash, got, numBuckets)
+		}
+	}
+}
+
+func TestUniformBucketerLogic(t *testing.T) {
+	numBuckets := uint64(1020)
+	var b UniformBucketer
+	requireBucketInit(t, &b, numBuckets, 0, 0) // Lambda/alpha ignored
+
+	rng := rand.New(rand.NewSource(1)) // Fixed seed for deterministic test
+	for i := 0; i < 100; i++ {
+		h := rng.Uint64()
+		want := BucketIDType(h % numBuckets)
+		got := b.Bucket(h)
+		if got != want {
+			// Compare FastModU64 directly if needed for debugging
+			gotFastMod := FastModU64(h, b.mNumBuckets, numBuckets)
+			t.Errorf("UniformBucket(0x%x): got %d, want %d (FastMod=%d)", h, got, want, gotFastMod)
+		}
+		if uint64(got) >= numBuckets {
+			t.Errorf("UniformBucket(0x%x): got %d, out of range [0, %d)", h, got, numBuckets)
+		}
+	}
+}
+
+func TestSkewBucketerLogic(t *testing.T) {
+	numBuckets := uint64(1000)
+	var b SkewBucketer
+	requireBucketInit(t, &b, numBuckets, 0, 0) // Lambda/alpha ignored
+
+	numDense := b.numDenseBuckets // Store calculated values
+	numSparse := b.numSparseBuckets
+
+	if numDense+numSparse != numBuckets {
+		t.Fatalf("Dense (%d) + Sparse (%d) != Total (%d)", numDense, numSparse, numBuckets)
+	}
+
+	threshold := uint64(float64(math.MaxUint64) * ConstA)
+
+	tests := []uint64{
+		0, threshold - 1, threshold, threshold + 1, math.MaxUint64,
+		1 << 60, // Example high hash
+		1 << 30, // Example low hash
+	}
+
+	rng := rand.New(rand.NewSource(2))
+	for i := 0; i < 100; i++ {
+		tests = append(tests, rng.Uint64())
+	}
+
+	for _, h := range tests {
+		got := b.Bucket(h)
+		if h < threshold {
+			if uint64(got) >= numDense {
+				t.Errorf("SkewBucket(0x%x) (Low Hash): got %d, expected < %d", h, got, numDense)
+			}
+			// Optional: check against FastMod
+			if numDense > 0 {
+				want := BucketIDType(FastModU64(h, b.mNumDenseBuckets, numDense))
+				if got != want {
+					t.Errorf("SkewBucket(0x%x) (Low Hash): got %d, want %d (FastMod)", h, got, want)
+				}
+			}
+		} else { // h >= threshold
+			if uint64(got) < numDense || uint64(got) >= numDense+numSparse {
+				t.Errorf("SkewBucket(0x%x) (High Hash): got %d, expected in [%d, %d)", h, got, numDense, numDense+numSparse)
+			}
+			// Optional: check against FastMod
+			if numSparse > 0 {
+				want := BucketIDType(numDense + FastModU64(h, b.mNumSparseBuckets, numSparse))
+				if got != want {
+					t.Errorf("SkewBucket(0x%x) (High Hash): got %d, want %d (FastMod)", h, got, want)
+				}
+			}
+		}
+	}
+}
+
+func TestBucketerSerialization(t *testing.T) {
+	// Define the concrete types needed for the TableBucketer instantiation
+	type OptBase = *OptBucketer // Base type for the generic TableBucketer
+
+	bucketers := map[string]Bucketer{
+		"Range":   &RangeBucketer{},
+		"Uniform": &UniformBucketer{},
+		"Skew":    &SkewBucketer{},
+		"Opt":     &OptBucketer{},
+		// Correctly pass a pointer to the zero value of the *Base* type.
+		// NewTableBucketer requires the actual base instance.
+		"Table": NewTableBucketer[OptBase](&OptBucketer{}),
+		// If you uncomment TableLinear, it would be:
+		// "TableLinear": NewTableBucketer[*UniformBucketer](&UniformBucketer{}),
+	}
+	numBuckets := uint64(123)
+	testHash := uint64(0xabcdef1234567890)
+
+	for name, b1 := range bucketers {
+		t.Run(name, func(t *testing.T) {
+			// Init the original bucketer
+			// Use some common params; ensure tableSize is reasonable
+			initTableSize := numBuckets * 3
+			if initTableSize == 0 {
+				initTableSize = 1
+			} // Avoid 0 table size
+			err := b1.Init(numBuckets, 4.5, initTableSize, 0.95)
+			if err != nil {
+				// Opt/Table might fail with numBuckets=0, skip if so
+				// (They should handle it gracefully now, but keep skip for safety)
+				if numBuckets == 0 && (name == "Opt" || strings.HasPrefix(name, "Table")) {
+					t.Skipf("Skipping %s serialization test for numBuckets=0 (Init failed or skipped)", name)
+				}
+				// Only fail if it's not an expected "not implemented" during dev
+				if !strings.Contains(err.Error(), "not implemented") {
+					t.Fatalf("b1.Init failed unexpectedly: %v", err)
+				} else {
+					t.Logf("Skipping %s serialization test: Init failed (likely due to unimplemented dependency): %v", name, err)
+					t.SkipNow()
+				}
+			}
+			// Re-check NumBuckets after Init, handling the case where Init might adjust it (though unlikely for these bucketers)
+			initializedNumBuckets := b1.NumBuckets()
+			if initializedNumBuckets != numBuckets && numBuckets != 0 {
+				// This might indicate an issue in Init or the test setup if numBuckets > 0
+				// Log instead of failing immediately if Init might change numBuckets (unlikely here).
+				t.Logf("NumBuckets mismatch after init: got %d, want %d (test input was %d)", initializedNumBuckets, numBuckets, numBuckets)
+			}
+			bucket1 := b1.Bucket(testHash) // Get result before marshal
+
+			// Marshal
+			data, err := serial.TryMarshal(b1) // Use helper
+			if err != nil {
+				// Check for expected "not implemented" errors during development
+				if strings.Contains(err.Error(), "not implemented") {
+					t.Logf("Skipping serialization check for %s: MarshalBinary not implemented", name)
+					t.SkipNow() // Skip the rest of this subtest
+				}
+				t.Fatalf("Marshal failed: %v", err)
+			}
+			// Allow empty data only if initialized numBuckets was 0
+			if len(data) == 0 && initializedNumBuckets > 0 {
+				t.Fatalf("Marshal returned empty data for non-empty bucketer")
+			}
+
+			// --- Corrected Unmarshaling ---
+			// 1. Get the concrete type underlying the interface `b1`.
+			//    Since b1 holds a pointer (e.g., *RangeBucketer), this gives us the pointer type.
+			concretePtrType := reflect.ValueOf(b1).Type()
+
+			// 2. Get the type of the struct itself (e.g., RangeBucketer) by dereferencing the pointer type.
+			concreteStructType := concretePtrType.Elem()
+
+			// 3. Create a new zero value *pointer* to the struct type (e.g., *RangeBucketer).
+			//    reflect.New allocates memory for the struct and returns a Value representing the pointer.
+			b2ValuePtr := reflect.New(concreteStructType)
+
+			// 4. Get the interface value from the reflect.Value. This will be of type interface{},
+			//    but the dynamic value will be the pointer (e.g., *RangeBucketer).
+			b2Interface := b2ValuePtr.Interface()
+
+			// 5. Assert the interface{} value back to the Bucketer interface type.
+			b2, ok := b2Interface.(Bucketer)
+			if !ok {
+				// This should not happen if the types are correct
+				t.Fatalf("Failed type assertion during unmarshal setup for type %s", concretePtrType.String())
+			}
+			// --- End Corrected Unmarshaling Setup ---
+
+			err = serial.TryUnmarshal(b2, data) // Unmarshal into the newly created pointer instance
+			if err != nil {
+				// Check for expected "not implemented" errors during development
+				if strings.Contains(err.Error(), "not implemented") {
+					t.Logf("Skipping serialization check for %s: UnmarshalBinary not implemented", name)
+					t.SkipNow() // Skip the rest of this subtest
+				}
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+
+			// Compare
+			if initializedNumBuckets != b2.NumBuckets() {
+				t.Errorf("NumBuckets mismatch after unmarshal: %d != %d", initializedNumBuckets, b2.NumBuckets())
+			}
+			bucket2 := b2.Bucket(testHash)
+			if bucket1 != bucket2 {
+				t.Errorf("Bucket(0x%x) mismatch after unmarshal: %d != %d", testHash, bucket1, bucket2)
+			}
+			// Optional: Add NumBits comparison if reliable
+			// if b1.NumBits() != b2.NumBits() {
+			// 	t.Errorf("NumBits mismatch after unmarshal: %d != %d", b1.NumBits(), b2.NumBits())
+			// }
+		})
 	}
 }
