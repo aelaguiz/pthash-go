@@ -131,3 +131,50 @@ func TestDenseInterleavedAccess(t *testing.T) {
 		}
 	}
 }
+
+func TestDenseInterleavedSerialization(t *testing.T) {
+	type E = CompactEncoder // Use Compact as underlying
+	di1 := DenseInterleaved[*E]{}
+	// Simulate encoding
+	numBuckets := 3
+	numParts := 4
+	di1.Encoders = make([]**E, numBuckets) // Slice of pointers to pointers
+	for b := 0; b < numBuckets; b++ {
+		pilots := make([]uint64, numParts)
+		for p := 0; p < numParts; p++ {
+			pilots[p] = uint64(b*100 + p)
+		}
+		encoderPtr := &E{} // Allocate the encoder
+		err := encoderPtr.Encode(pilots)
+		if err != nil { t.Fatalf("Encode failed: %v", err) }
+		di1.Encoders[b] = &encoderPtr // Store address of pointer
+	}
+
+	data, err := di1.MarshalBinary()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	di2 := DenseInterleaved[*E]{}
+	err = di2.UnmarshalBinary(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if len(di1.Encoders) != len(di2.Encoders) {
+		t.Fatalf("Number of encoders mismatch: %d != %d", len(di1.Encoders), len(di2.Encoders))
+	}
+	for b := 0; b < len(di1.Encoders); b++ {
+		if di1.Encoders[b] == nil || di2.Encoders[b] == nil || *di1.Encoders[b] == nil || *di2.Encoders[b] == nil {
+			t.Fatalf("Encoder %d is nil after unmarshal", b)
+		}
+		enc1 := *di1.Encoders[b]
+		enc2 := *di2.Encoders[b]
+		if enc1.Size() != enc2.Size() {
+			t.Errorf("Encoder %d size mismatch: %d != %d", b, enc1.Size(), enc2.Size())
+		}
+	}
+	if di1.AccessDense(1, 1) != di2.AccessDense(1, 1) {
+		t.Errorf("AccessDense mismatch")
+	}
+}

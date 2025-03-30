@@ -490,3 +490,132 @@ func TestBucketerSerialization(t *testing.T) {
 		})
 	}
 }
+
+func TestSkewBucketerSerialization(t *testing.T) {
+	sb1 := &SkewBucketer{}
+	err := sb1.Init(1000, 5.0, 2000, 0.95)
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	hash := uint64(0x1234567890ABCDEF)
+	bucket1 := sb1.Bucket(hash)
+
+	data, err := sb1.MarshalBinary()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	sb2 := &SkewBucketer{}
+	err = sb2.UnmarshalBinary(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if sb1.numDenseBuckets != sb2.numDenseBuckets ||
+		sb1.numSparseBuckets != sb2.numSparseBuckets ||
+		sb1.mNumDenseBuckets != sb2.mNumDenseBuckets ||
+		sb1.mNumSparseBuckets != sb2.mNumSparseBuckets {
+		t.Errorf("Data mismatch after unmarshal.\nGot: %+v\nWant:%+v", sb2, sb1)
+	}
+	bucket2 := sb2.Bucket(hash)
+	if bucket1 != bucket2 {
+		t.Errorf("Bucket mismatch after unmarshal: %d != %d", bucket1, bucket2)
+	}
+}
+
+func TestUniformBucketerSerialization(t *testing.T) {
+	ub1 := &UniformBucketer{}
+	err := ub1.Init(999, 5.0, 2000, 0.95)
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	hash := uint64(0x1234567890ABCDEF)
+	bucket1 := ub1.Bucket(hash)
+
+	data, err := ub1.MarshalBinary()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	ub2 := &UniformBucketer{}
+	err = ub2.UnmarshalBinary(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if ub1.numBuckets != ub2.numBuckets || ub1.mNumBuckets != ub2.mNumBuckets {
+		t.Errorf("Data mismatch after unmarshal.\nGot: %+v\nWant:%+v", ub2, ub1)
+	}
+	bucket2 := ub2.Bucket(hash)
+	if bucket1 != bucket2 {
+		t.Errorf("Bucket mismatch after unmarshal: %d != %d", bucket1, bucket2)
+	}
+}
+
+func TestOptBucketerSerialization(t *testing.T) {
+	ob1 := &OptBucketer{}
+	err := ob1.Init(888, 4.3, 1800, 0.99)
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	hash := uint64(0xFEDCBA9876543210)
+	bucket1 := ob1.Bucket(hash)
+
+	data, err := ob1.MarshalBinary() // Use the now non-placeholder implementation
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	ob2 := &OptBucketer{}
+	err = ob2.UnmarshalBinary(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if ob1.numBuckets != ob2.numBuckets || ob1.c != ob2.c || ob1.alpha != ob2.alpha || ob1.alphaFactor != ob2.alphaFactor {
+		t.Errorf("Data mismatch after unmarshal.\nGot: %+v\nWant:%+v", ob2, ob1)
+	}
+	bucket2 := ob2.Bucket(hash)
+	if bucket1 != bucket2 {
+		t.Errorf("Bucket mismatch after unmarshal: %d != %d", bucket1, bucket2)
+	}
+}
+
+func TestTableBucketerSerialization(t *testing.T) {
+	// Test with OptBucketer as base
+	baseOpt1 := &OptBucketer{}
+	tb1 := NewTableBucketer[*OptBucketer](baseOpt1) // Initialize correctly
+	err := tb1.Init(777, 3.9, 1500, 0.97)
+	if err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	hash := uint64(0xABCDEF0123456789)
+	bucket1 := tb1.Bucket(hash)
+
+	data, err := tb1.MarshalBinary()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	// Create a new empty instance for unmarshaling
+	baseOpt2 := &OptBucketer{}
+	tb2 := NewTableBucketer[*OptBucketer](baseOpt2)
+	err = tb2.UnmarshalBinary(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	// Compare core fields and functionality
+	if tb1.NumBuckets() != tb2.NumBuckets() {
+		t.Errorf("NumBuckets mismatch: %d != %d", tb1.NumBuckets(), tb2.NumBuckets())
+	}
+	// Cannot easily DeepEqual generic base or fixed array, check functional equivalence
+	bucket2 := tb2.Bucket(hash)
+	if bucket1 != bucket2 {
+		t.Errorf("Bucket mismatch after unmarshal: %d != %d", bucket1, bucket2)
+	}
+	// Optionally compare a few fulcrum points if needed
+	// if !reflect.DeepEqual(tb1.GetFulcrums(), tb2.GetFulcrums()) { // Need GetFulcrums method
+	// 	t.Error("Fulcrums differ")
+	// }
+}
