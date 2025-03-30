@@ -216,6 +216,12 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		log.Printf("[DEBUG D1.Select] EXIT: rank >= numSetBits, returning size %d", d.size)
 		return d.size // Rank out of bounds
 	}
+	
+	// Special case for empty bit vector
+	if d.size == 0 || d.numSetBits == 0 {
+		log.Printf("[DEBUG D1.Select] EXIT: Empty bit vector, returning size %d", d.size)
+		return d.size
+	}
 
 	// 1. Find superblock containing the rank using binary search on superBlockRanks
 	sbIdx := uint64(0)

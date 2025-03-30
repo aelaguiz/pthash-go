@@ -317,17 +317,30 @@ func (e *CompactEncoder) Encode(pilots []uint64) error {
 		e.values = NewCompactVector(0, 0)
 		return nil
 	}
+	
+	// Check if all values are zero for width=0 optimization
+	allZeros := true
 	maxVal := uint64(0)
 	for _, p := range pilots {
-		if p > maxVal {
-			maxVal = p
+		if p > 0 {
+			allZeros = false
+			if p > maxVal {
+				maxVal = p
+			}
 		}
 	}
-	w := uint8(1) // Min width is 1, even for all zeros
-	if maxVal > 0 {
-		w = uint8(bits.Len64(maxVal))
+	
+	// If all values are zero, create a special zero-width vector
+	if allZeros {
+		log.Printf("[DEBUG CompactEncoder.Encode] All values are zero, using width=0")
+		e.values = NewCompactVector(n, 0)
+		return nil
 	}
-
+	
+	// Determine minimum width needed for max value
+	w := uint8(bits.Len64(maxVal))
+	
+	log.Printf("[DEBUG CompactEncoder.Encode] Found maxVal=%d, using width=%d", maxVal, w)
 	cvb := NewCompactVectorBuilder(n, w)
 	for i, p := range pilots {
 		cvb.Set(uint64(i), p)
