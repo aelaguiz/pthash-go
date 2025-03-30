@@ -19,8 +19,8 @@ test:
 	go test ./... -v
 
 build-simple-e2e:
-	@echo "Building simple end-to-end example..."
-	go build -o simple_e2e ./examples/simple_e2e
+	@echo "Building simple end-to-end example with race detection..."
+	go build -race -o simple_e2e ./examples/simple_e2e
 
 simple-e2e: build-simple-e2e
 	@echo "Running simple end-to-end example..."
