@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"time"
 
 	"pthashgo/internal/builder"
@@ -39,6 +40,23 @@ func NewSinglePHF[K any, H core.Hasher[K], B core.Bucketer, E core.Encoder](mini
 	var hasher H
 	var bucketer B
 	var encoder E
+
+	// Initialize encoder correctly if E is a pointer type
+	typeE := reflect.TypeOf(encoder)
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		elemType := typeE.Elem()
+		newInstance := reflect.New(elemType) // Creates a new pointer to the underlying type
+		if newInstance.CanInterface() {
+			encoder = newInstance.Interface().(E) // Cast to the correct type
+		} else {
+			panic(fmt.Sprintf("Cannot interface allocated pointer for encoder type %v", elemType))
+		}
+		// Verify it's not nil
+		if reflect.ValueOf(encoder).IsNil() {
+			panic(fmt.Sprintf("Failed to allocate non-nil pointer encoder for type %v", typeE))
+		}
+	}
+	// If E is a value type, the zero value is already correct
 
 	return &SinglePHF[K, H, B, E]{
 		isMinimal:  minimal,
