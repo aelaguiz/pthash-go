@@ -317,7 +317,7 @@ func (e *CompactEncoder) Encode(pilots []uint64) error {
 		e.values = NewCompactVector(0, 0)
 		return nil
 	}
-	
+
 	// Check if all values are zero for width=0 optimization
 	allZeros := true
 	maxVal := uint64(0)
@@ -329,17 +329,17 @@ func (e *CompactEncoder) Encode(pilots []uint64) error {
 			}
 		}
 	}
-	
+
 	// If all values are zero, create a special zero-width vector
 	if allZeros {
 		log.Printf("[DEBUG CompactEncoder.Encode] All values are zero, using width=0")
 		e.values = NewCompactVector(n, 0)
 		return nil
 	}
-	
+
 	// Determine minimum width needed for max value
 	w := uint8(bits.Len64(maxVal))
-	
+
 	log.Printf("[DEBUG CompactEncoder.Encode] Found maxVal=%d, using width=%d", maxVal, w)
 	cvb := NewCompactVectorBuilder(n, w)
 	for i, p := range pilots {
@@ -540,9 +540,8 @@ func (ef *EliasFano) Access(rank uint64) uint64 {
 		panic("EliasFano.Access: D1Array or its BitVector not initialized")
 	}
 	if ef.lowerBits == nil && ef.numLowBits > 0 { // Add check for lowerBits
-	    panic("EliasFano.Access: lowerBits is nil but numLowBits > 0")
+		panic("EliasFano.Access: lowerBits is nil but numLowBits > 0")
 	}
-
 
 	// --- Call Select for current rank ---
 	selectRank := rank
@@ -719,44 +718,5 @@ func (ef *EliasFano) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// IsEliasFanoStubbed checks if the EliasFano implementation is just a stub.
-// Useful for skipping tests that rely on its functionality.
-func IsEliasFanoStubbed() bool {
-	// Check if a key method like NumBits returns 0 or Access panics immediately.
-	// If D1Array is a stub, EF will likely be too.
-	ef := NewEliasFano()
-	// A simple check: if NumBits is very small for a non-empty structure, it's likely a stub.
-	// Let's encode a single value and check NumBits.
-	log.Printf("[DEBUG IsEliasFanoStubbed] Encoding [10]...")
-	err := ef.Encode([]uint64{10})
-	if err != nil {
-		log.Printf("[DEBUG IsEliasFanoStubbed] Encode returned error: %v", err)
-		// If Encode itself fails, consider it stubbed/broken
-		return true
-	}
-	return false
-}
-
 // --- Placeholder Dictionary/SDC/Dual etc. ---
 // Add stubs or full implementations later
-
-// IsD1ArraySelectStubbed checks if D1Array.Select is likely a stub.
-// This is a basic check, assuming a stub might not implement NumBits correctly
-// or Select always returns a constant.
-func IsD1ArraySelectStubbed() bool {
-	bv := NewBitVector(10)
-	bv.Set(5)
-	d1 := NewD1Array(bv)
-	// A real D1Array should have non-zero bits for its structure.
-	// A very simple stub might return 0.
-	// Also check if Select returns a constant value (like 0 or size) incorrectly.
-	selectWorks := true
-	defer func() {
-		if r := recover(); r != nil {
-			selectWorks = false // Select panicked, likely stubbed
-		}
-	}()
-	pos := d1.Select(0)
-	// If NumBits is very small or Select returns the size for rank 0 on a non-empty vector, assume stub.
-	return d1.NumBits() < 64 || (pos == d1.size && d1.numSetBits > 0) || !selectWorks
-}
