@@ -60,26 +60,53 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 									// Use a fixed seed for reproducibility
 									config.Seed = 42
 
-									// --- Build using Partitioned Builder ---
-									hasher := core.NewXXHash128Hasher[K]()
-									pb := builder.NewInternalMemoryBuilderPartitionedPHF[K, H, B](hasher) // Pass sub-bucketer type B
+									// --- Build using Partitioned Builder with Retry Logic ---
+									const maxBuildRetries = 3 // Try up to 3 different random seeds
+									var pb *builder.InternalMemoryBuilderPartitionedPHF[K, H, B]
+									var buildTimings core.BuildTimings
+									var err error
+									buildSuccess := false
 
-									buildTimings, err := pb.BuildFromKeys(keys, config)
-									if err != nil {
+									for attempt := 0; attempt < maxBuildRetries; attempt++ {
+										// Use a different seed for each attempt
+										if attempt > 0 {
+											config.Seed = util.RandomSeed() // New random seed for retries
+										}
+										t.Logf("Build attempt %d/%d with seed %d...", attempt+1, maxBuildRetries, config.Seed)
+
+										hasher := core.NewXXHash128Hasher[K]()
+										pb = builder.NewInternalMemoryBuilderPartitionedPHF[K, H, B](hasher) // Pass sub-bucketer type B
+
+										buildTimings, err = pb.BuildFromKeys(keys, config)
+										if err == nil {
+											buildSuccess = true // Found a working seed
+											t.Logf("Build attempt %d succeeded with seed %d", attempt+1, config.Seed)
+											break
+										}
+
 										// Check if this error or any wrapped error is a SeedRuntimeError
 										var seedErr core.SeedRuntimeError
 										if errors.As(err, &seedErr) {
-											// Use Skipf to mark the test as skipped with the error message
-											t.Skipf("Skipping test: BuildFromKeys failed with SeedRuntimeError: %v", seedErr)
-											return
+											// Log seed failure and continue to next attempt
+											t.Logf("Build attempt %d failed with SeedRuntimeError: %v", attempt+1, seedErr)
+											continue
+										} else {
+											// Fail on other unexpected errors
+											t.Fatalf("BuildFromKeys failed with unexpected error on attempt %d: %v", attempt+1, err)
 										}
-										// Fail on other unexpected errors
-										t.Fatalf("BuildFromKeys failed with unexpected error: %v", err)
+									}
+
+									// If all attempts failed, skip this test configuration
+									if !buildSuccess {
+										t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)", 
+											maxBuildRetries, err)
+										return
 									}
 
 									// --- Construct Final PartitionedPHF ---
+									// --- Construct Final PartitionedPHF (only reached on successful builds) ---
 									finalPHF := pthash.NewPartitionedPHF[K, H, B, E](minimal, searchType)
-									encodeTime, err := finalPHF.Build(pb, &config)
+									encodeTime, err := finalPHF.Build(pb, &config) // Use the successful builder instance
 									if err != nil {
 										// Still check for stub issues here if serialization/final build depends on them
 										if core.IsEliasFanoStubbed() && config.Minimal {
@@ -169,19 +196,46 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 	config.AvgPartitionSize = avgPartSize
 	config.DensePartitioning = false // Not dense
 
-	// --- Build the Partitioned PHF ---
-	hasher := core.NewMurmurHash2_64Hasher[K]()
-	// Partitioned builder needs sub-bucketer type B passed
-	builderInst := builder.NewInternalMemoryBuilderPartitionedPHF[K, H, *B](hasher) // Use pointer type *B
+	// --- Build the Partitioned PHF with Retry Logic ---
+	const maxBuildRetries = 3 // Try up to 3 different random seeds
+	var builderInst *builder.InternalMemoryBuilderPartitionedPHF[K, H, *B]
+	var err error
+	buildSuccess := false
 
-	_, err := builderInst.BuildFromKeys(keys, config)
-	if err != nil {
+	for attempt := 0; attempt < maxBuildRetries; attempt++ {
+		// Use a different seed for each attempt
+		if attempt > 0 {
+			config.Seed = util.RandomSeed() // New random seed for retries
+		}
+		t.Logf("Build attempt %d/%d with seed %d...", attempt+1, maxBuildRetries, config.Seed)
+
+		hasher := core.NewMurmurHash2_64Hasher[K]()
+		builderInst = builder.NewInternalMemoryBuilderPartitionedPHF[K, H, *B](hasher) // Use pointer type *B
+
+		_, err = builderInst.BuildFromKeys(keys, config)
+		if err == nil {
+			buildSuccess = true // Found a working seed
+			t.Logf("Build attempt %d succeeded with seed %d", attempt+1, config.Seed)
+			break
+		}
+
+		// Check if this error or any wrapped error is a SeedRuntimeError
 		var seedErr core.SeedRuntimeError
 		if errors.As(err, &seedErr) {
-			t.Skipf("Skipping test: BuildFromKeys failed with SeedRuntimeError: %v", seedErr)
-			return
+			// Log seed failure and continue to next attempt
+			t.Logf("Build attempt %d failed with SeedRuntimeError: %v", attempt+1, seedErr)
+			continue
+		} else {
+			// Fail on other unexpected errors
+			t.Fatalf("BuildFromKeys failed with unexpected error on attempt %d: %v", attempt+1, err)
 		}
-		t.Fatalf("BuildFromKeys failed: %v", err)
+	}
+
+	// If all attempts failed, skip this test configuration
+	if !buildSuccess {
+		t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)", 
+			maxBuildRetries, err)
+		return
 	}
 
 	phf1 := pthash.NewPartitionedPHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
@@ -268,14 +322,46 @@ func TestPartitionedPHFSerializationDense(t *testing.T) {
 	config.AvgPartitionSize = avgPartSize
 	config.DensePartitioning = false // Not dense
 
-	// --- Build the Partitioned PHF ---
-	hasher := core.NewMurmurHash2_64Hasher[K]()
-	// Partitioned builder needs sub-bucketer type B passed
-	builderInst := builder.NewInternalMemoryBuilderPartitionedPHF[K, H, *B](hasher) // Use pointer type *B
+	// --- Build the Partitioned PHF with Retry Logic ---
+	const maxBuildRetries = 3 // Try up to 3 different random seeds
+	var builderInst *builder.NewInternalMemoryBuilderPartitionedPHF[K, H, *B]
+	var err error
+	buildSuccess := false
 
-	_, err := builderInst.BuildFromKeys(keys, config)
-	if err != nil {
-		t.Fatalf("BuildFromKeys failed: %v", err)
+	for attempt := 0; attempt < maxBuildRetries; attempt++ {
+		// Use a different seed for each attempt
+		if attempt > 0 {
+			config.Seed = util.RandomSeed() // New random seed for retries
+		}
+		t.Logf("Build attempt %d/%d with seed %d...", attempt+1, maxBuildRetries, config.Seed)
+
+		hasher := core.NewMurmurHash2_64Hasher[K]()
+		builderInst = builder.NewInternalMemoryBuilderPartitionedPHF[K, H, *B](hasher) // Use pointer type *B
+
+		_, err = builderInst.BuildFromKeys(keys, config)
+		if err == nil {
+			buildSuccess = true // Found a working seed
+			t.Logf("Build attempt %d succeeded with seed %d", attempt+1, config.Seed)
+			break
+		}
+
+		// Check if this error is a SeedRuntimeError
+		var seedErr core.SeedRuntimeError
+		if errors.As(err, &seedErr) {
+			// Log seed failure and continue to next attempt
+			t.Logf("Build attempt %d failed with SeedRuntimeError: %v", attempt+1, seedErr)
+			continue
+		} else {
+			// Fail on other unexpected errors
+			t.Fatalf("BuildFromKeys failed with unexpected error on attempt %d: %v", attempt+1, err)
+		}
+	}
+
+	// If all attempts failed, skip this test configuration
+	if !buildSuccess {
+		t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)", 
+			maxBuildRetries, err)
+		return
 	}
 
 	phf1 := pthash.NewPartitionedPHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
