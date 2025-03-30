@@ -591,14 +591,14 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 		// Add a test case that forces crossing a 64-bit boundary in upperBits
 		{
 			name:   "CrossWordBoundary_L1",              // Need L>0 so high parts change. N=30, U~120 -> L=floor(log2(120/30))=2.
-			values: generateCrossingSequence(30, 1, 60), // L=1 forced. Values like 0,3,6,...,87. Max High ~ 43. Deltas mostly 1 or 2.
+			values: generateCrossingSequence(30, 1, 60), // N=30, L=1. Values generate high parts with deltas of 2 then 1.
 			wantL:  1,
 			wantN:  30,
-			// Lower: 0,1,0,1,...,0,1 (alternating)
+			// Lower bits are alternating 0, 1 for L=1
 			wantLowerValues: generateExpectedLows(30, 1),
-			// Upper: 1,01,01,01, (30 ones), total length 60. Add one more? Let's make N=35. U~105. L=1.
-			// Upper: 1 + 34 * 01 -> Length 1+68=69. Bits: 1010101...01 (34 '01' pairs)
-			wantUpperBits: "1" + repeatString("01", 29),
+			// Corrected UpperBits: Delta=0 -> "1". Delta=2 -> "001" (19 times). Delta=1 -> "01" (10 times).
+			// Length = 1 + 19*3 + 10*2 = 1 + 57 + 20 = 78
+			wantUpperBits: "1" + repeatString("001", 19) + repeatString("01", 10),
 		},
 	}
 
