@@ -56,10 +56,42 @@ func (dm *DenseMono[E]) EncodeDense(iterator PilotIterator, numPartitions uint64
 	if uint64(len(allPilots)) != totalPilots {
 		return fmt.Errorf("DenseMono.EncodeDense: iterator provided %d pilots, expected %d", len(allPilots), totalPilots)
 	}
-	// Create a new encoder instance to encode into
-	var encoder E                       // Create zero value
-	dm.Encoder = encoder                // Assign (potentially zero value)
-	return dm.Encoder.Encode(allPilots) // Call encode on the instance
+
+	// Initialize dm.Encoder correctly before use
+	var zeroEncoder E // Get the type E (e.g., *RiceEncoder)
+	typeE := reflect.TypeOf(zeroEncoder)
+
+	// Check if we need to allocate a new encoder instance
+	shouldAllocate := false
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		// If E is a pointer type, check if the current dm.Encoder is nil
+		if reflect.ValueOf(dm.Encoder).IsNil() {
+			shouldAllocate = true
+		}
+	} else if typeE != nil {
+		// If E is a value type, ensure dm.Encoder holds at least the zero value
+		dm.Encoder = zeroEncoder
+	}
+
+	if shouldAllocate {
+		// E is a pointer type (e.g., *RiceEncoder), and dm.Encoder is nil.
+		// Allocate the underlying type.
+		elemType := typeE.Elem()               // e.g., RiceEncoder
+		newInstance := reflect.New(elemType)   // Create *RiceEncoder as reflect.Value
+		// Assign the created pointer (*RiceEncoder) to dm.Encoder
+		if newInstance.CanInterface() {
+			dm.Encoder = newInstance.Interface().(E)
+		} else {
+			panic(fmt.Sprintf("Cannot interface allocated pointer encoder for type %v", elemType))
+		}
+		// Verify it's not nil after assignment
+		if reflect.ValueOf(dm.Encoder).IsNil() {
+			panic(fmt.Sprintf("Failed to allocate non-nil pointer encoder for type %v", typeE))
+		}
+	}
+
+	// Now call Encode on the (guaranteed non-nil if pointer type) dm.Encoder
+	return dm.Encoder.Encode(allPilots)
 }
 func (dm *DenseMono[E]) AccessDense(partition uint64, bucket uint64) uint64 {
 	if dm.NumPartitions == 0 {

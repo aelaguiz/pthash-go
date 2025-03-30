@@ -8,6 +8,7 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/serial" // Use centralized helpers
 	"pthashgo/internal/util"
+	"reflect" // Import reflect for type checking
 	"time"
 )
 
@@ -37,14 +38,37 @@ type DensePartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.DenseE
 func NewDensePartitionedPHF[K any, H core.Hasher[K], B core.Bucketer, E core.DenseEncoder](minimal bool, search core.SearchType) *DensePartitionedPHF[K, H, B, E] {
 	var hasher H
 	var subBucketer B
-	var pilots E
+	var pilots E // Zero value of type E (could be value or pointer type)
+
+	// Initialize pilots correctly if E is a pointer type
+	typeE := reflect.TypeOf(pilots)
+	// Check if E is defined (not nil interface) and is a pointer kind
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		// E is a pointer type (like *DenseMono[*RiceEncoder]).
+		// Create the underlying struct instance.
+		elemType := typeE.Elem()
+		newInstance := reflect.New(elemType) // e.g., creates *DenseMono[*RiceEncoder]
+		// Assign the created pointer back to pilots
+		if newInstance.CanInterface() {
+			pilots = newInstance.Interface().(E)
+		} else {
+			// This case might occur for unexported types, unlikely here
+			panic(fmt.Sprintf("Cannot interface allocated pointer for type %v", elemType))
+		}
+		// Double-check pilots is not nil after allocation attempt
+		if reflect.ValueOf(pilots).IsNil() {
+			panic(fmt.Sprintf("Failed to allocate non-nil pointer for type %v", typeE))
+		}
+	}
+	// If E is a value type, the zero value 'pilots' is already initialized
+
 	offsetsEnc := &core.DiffEncoder[*core.CompactEncoder]{} // Initialize diff encoder
 	return &DensePartitionedPHF[K, H, B, E]{
 		isMinimal:   minimal,
 		searchType:  search,
 		hasher:      hasher,
 		subBucketer: subBucketer,
-		pilots:      pilots,
+		pilots:      pilots, // Assign the potentially initialized 'pilots'
 		offsets:     offsetsEnc,
 		// partitioner and freeSlots initialized in Build
 	}
