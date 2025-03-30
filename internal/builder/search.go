@@ -284,33 +284,67 @@ func searchParallelXOR(
 
 	// Worker goroutine function
 	worker := func(tid int) {
-		log.Printf("Worker thread %d started", tid)
-		defer wg.Done()
+		log.Printf("DIAGNOSE [W%d]: Worker started", tid) // Log worker start
+		defer func() {
+			log.Printf("DIAGNOSE [W%d]: Worker exiting", tid) // Log worker exit
+			wg.Done()
+		}()
 		positions := make([]uint64, 0, core.MaxBucketSize) // Thread-local buffer
 
-		for {
-			// Get the next bucket to process for this thread
+		loopIteration := 0 // Counter for loop iterations
+
+		for { // Main worker loop
+			loopIteration++
+			log.Printf("DIAGNOSE [W%d]: Loop iteration %d - Top", tid, loopIteration)
+
+			// Log state BEFORE acquiring lock
+			currentGlobalIdxBeforeLock := nextBucketIdx.Load()
+			log.Printf("DIAGNOSE [W%d]: Before Lock - nextBucketIdx=%d, limit=%d", tid, currentGlobalIdxBeforeLock, numNonEmptyBuckets)
+
+			// --- Acquire Lock ---
+			log.Printf("DIAGNOSE [W%d]: Attempting bucketMutex Lock...", tid)
 			bucketMutex.Lock()
-			if !bucketsIt.HasNext() {
+			log.Printf("DIAGNOSE [W%d]: Acquired bucketMutex Lock.", tid)
+
+			// --- Check Conditions UNDER LOCK ---
+			currentGlobalIdxInLock := nextBucketIdx.Load() // Re-read under lock
+			hasNext := bucketsIt.HasNext()
+			log.Printf("DIAGNOSE [W%d]: Inside Lock - nextBucketIdx=%d, limit=%d, HasNext=%t", tid, currentGlobalIdxInLock, numNonEmptyBuckets, hasNext)
+
+			if currentGlobalIdxInLock >= numNonEmptyBuckets || !hasNext {
+				// Conditions met for termination
+				log.Printf("DIAGNOSE [W%d]: Termination condition met inside lock. Releasing lock and returning.", tid)
 				bucketMutex.Unlock()
-				return // No more buckets
+				log.Printf("DIAGNOSE [W%d]: Released bucketMutex Lock (for termination).", tid)
+				return // Exit worker cleanly
 			}
-			bucket := bucketsIt.Next()
-			localBucketIdx := nextBucketIdx.Add(1) - 1 // Atomically get and increment
+
+			// --- Conditions passed: Claim index and get bucket ---
+			localBucketIdx := nextBucketIdx.Add(1) - 1 // Claim index atomically
+			bucket := bucketsIt.Next()                 // Get bucket data
+			log.Printf("DIAGNOSE [W%d]: Claimed index %d, Got Bucket ID %d (Size %d). Releasing lock.", tid, localBucketIdx, bucket.ID(), bucket.Size())
 			bucketMutex.Unlock()
+			log.Printf("DIAGNOSE [W%d]: Released bucketMutex Lock (after getting bucket).", tid)
 
-			if localBucketIdx >= numNonEmptyBuckets {
-				return // Already processed enough buckets
-			}
-
+			// --- Process the bucket ---
 			bucketSize := bucket.Size()
 			bucketID := bucket.ID()
 			payloads := bucket.Payloads()
+			log.Printf("DIAGNOSE [W%d]: Processing index %d (BucketID: %d, Size: %d)", tid, localBucketIdx, bucketID, bucketSize)
 
-			// Simplified pilot search logic - no need for outer retry loop
+			// --- Pilot Search Loop (Keep logging minimal here unless debugging pilot search itself) ---
 			foundPilotForBucket := false
+			pilotSearchStartTime := time.Now()
 
-			for currentPilot := uint64(0); ; currentPilot++ {
+			for currentPilot := uint64(0); ; currentPilot++ { // Pilot loop unchanged for now
+
+				if currentPilot >= DefaultMaxPilotAttempts {
+					log.Printf("FAIL [W%d]: Reached max attempts (%d) for bucket index %d (ID: %d)", tid, DefaultMaxPilotAttempts, localBucketIdx, bucketID)
+					// TODO: How to handle global failure signal?
+					break // Exit pilot search for this bucket
+				}
+
+				// ... (pilot hash calculation, optimistic check, in-bucket check - unchanged) ...
 				hashedPilot := uint64(0)
 				if currentPilot < searchCacheSize {
 					hashedPilot = hashedPilotsCache[currentPilot]
@@ -318,26 +352,21 @@ func searchParallelXOR(
 					hashedPilot = core.DefaultHash64(currentPilot, seed)
 				}
 
-				positions = positions[:0] // Clear thread-local buffer
+				positions = positions[:0]
 				optimisticCheckFailed := false
-
 				for _, pld := range payloads {
 					hash := pld
 					p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
-
-					// Optimistic check - thread-safe now
-					if taken.Get(p) {
+					if taken.Get(p) { // Safe Get
 						optimisticCheckFailed = true
 						break
 					}
 					positions = append(positions, p)
 				}
-
 				if optimisticCheckFailed {
-					continue // Try next pilot value
+					continue
 				}
 
-				// Check in-bucket collisions
 				sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
 				inBucketCollision := false
 				for i := 1; i < len(positions); i++ {
@@ -347,32 +376,30 @@ func searchParallelXOR(
 					}
 				}
 				if inBucketCollision {
-					continue // Try next pilot value
+					continue
 				}
 
-				// Pilot found - directly set bits (thread-safe now)
+				// --- Commit ---
 				for _, p := range positions {
-					taken.Set(p)
+					taken.Set(p) // Safe Set
 				}
-
-				// Store the pilot
-				pilotsEmplaceBack(bucketID, currentPilot)
-
-				// Update progress
+				pilotsEmplaceBack(bucketID, currentPilot) // Uses pilotsMu
 				loggerMu.Lock()
 				logger.Update(localBucketIdx, bucketSize)
 				loggerMu.Unlock()
 
 				foundPilotForBucket = true
+				log.Printf("DIAGNOSE [W%d]: Found pilot %d for index %d (ID: %d) in %v", tid, currentPilot, localBucketIdx, bucketID, time.Since(pilotSearchStartTime))
 				break // Success for this bucket
-			}
+			} // End pilot search loop
 
 			if !foundPilotForBucket {
-				log.Printf("Worker: Thread %d couldn't find pilot for bucket %d - this shouldn't happen", tid, bucketID)
-				// This would only happen if we hit limitations not caught in the search loop
+				log.Printf("DIAGNOSE [W%d]: Failed to find pilot for index %d (ID: %d) after %d attempts.", tid, localBucketIdx, bucketID, DefaultMaxPilotAttempts)
+				// Continue to next bucket attempt in the worker loop
 			}
-		}
-	}
+
+		} // End main worker loop (`for {}`)
+	} // End worker func
 
 	// Start workers
 	log.Printf("Starting %d worker goroutines for parallel search", numThreads)
@@ -391,6 +418,7 @@ func searchParallelXOR(
 
 	return nil
 }
+
 func searchSequentialAdd(
 	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
 	config *core.BuildConfig,
