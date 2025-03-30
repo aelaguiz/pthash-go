@@ -5,7 +5,6 @@ import (
 	"math/bits"
 	"reflect"
 	"testing"
-	"time"
 )
 
 // buildBitVectorFromString creates a BitVector from a string of '0's and '1's.
@@ -212,7 +211,7 @@ func TestSelect64(t *testing.T) {
 func TestD1ArraySelect_EliasFanoPatterns(t *testing.T) {
 	tests := []struct {
 		name            string
-		pattern         string // LSB first string representation
+		pattern         string            // LSB first string representation
 		expectedSelects map[uint64]uint64 // rank -> expected position
 	}{
 		{
@@ -263,7 +262,7 @@ func TestD1ArraySelect_EliasFanoPatterns(t *testing.T) {
 			},
 		},
 		{
-			name:    "BoundaryCrossingBlock",                                          // Assuming BlockSize=4096
+			name:    "BoundaryCrossingBlock",                                           // Assuming BlockSize=4096
 			pattern: "1" + repeatString("0", 4094) + "1" + "1" + repeatString("0", 10), // '1' at 0, 4095, 4096
 			// Ranks:   0                       1    2
 			expectedSelects: map[uint64]uint64{
@@ -273,7 +272,7 @@ func TestD1ArraySelect_EliasFanoPatterns(t *testing.T) {
 			},
 		},
 		{
-			name:    "BoundaryCrossingSuperBlock", // Assuming SuperBlockSize=262144
+			name:    "BoundaryCrossingSuperBlock",                                        // Assuming SuperBlockSize=262144
 			pattern: "1" + repeatString("0", 262142) + "1" + "1" + repeatString("0", 10), // '1' at 0, 262143, 262144
 			// Ranks:   0                          1     2
 			expectedSelects: map[uint64]uint64{
