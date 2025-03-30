@@ -66,10 +66,6 @@ func TestDenseMonoSerialization(t *testing.T) {
 
 	err := dm1.Encoder.Encode(pilots)
 	if err != nil {
-		if IsD1ArraySelectStubbed() {
-			t.Skip("Skipping: D1Array stubbed")
-			return
-		}
 		t.Fatalf("Encode failed: %v", err)
 	}
 
@@ -81,10 +77,6 @@ func TestDenseMonoSerialization(t *testing.T) {
 	dm2 := DenseMono[E]{}
 	err = dm2.UnmarshalBinary(data)
 	if err != nil {
-		if IsD1ArraySelectStubbed() {
-			t.Skip("Skipping: D1Array stubbed")
-			return
-		}
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 

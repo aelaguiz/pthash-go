@@ -6,7 +6,6 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"pthashgo/pkg/pthash"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -30,11 +29,6 @@ func TestInternalDensePartitionedPHFBuildAndCheck(t *testing.T) {
 	lambdas := []float64{4.0}
 	searchTypes := []core.SearchType{core.SearchTypeXOR}
 	minimal := true // Only test minimal=true case, which is typical for dense partitioning
-
-	// Skip test entirely if EliasFano or other critical components are stubbed
-	if core.IsEliasFanoStubbed() {
-		t.Skip("TestInternalDensePartitionedPHFBuildAndCheck: EliasFano appears to be stubbed, skipping test")
-	}
 
 	for _, numKeys := range numKeysList {
 		keys := util.DistinctUints64(numKeys, seed)
@@ -246,11 +240,6 @@ func TestDensePHFSerialization(t *testing.T) {
 	phf1 := pthash.NewDensePartitionedPHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
 	_, err = phf1.Build(builderInst, &config)
 	if err != nil {
-		if (core.IsEliasFanoStubbed() && config.Minimal) ||
-			phf1.OffsetsNotImplemented() ||
-			reflect.TypeOf(new(E)).Elem().Name() == "DenseMono[*core.RiceEncoder]" && core.IsD1ArraySelectStubbed() { // Check specific dependencies
-			t.Skipf("Skipping serialization test: Dense PHF requires functional EliasFano, CompactVector, RiceEncoder/D1Array (stub detected): %v", err)
-		}
 		t.Fatalf("phf1.Build failed: %v", err)
 	}
 
@@ -291,7 +280,7 @@ func TestDensePHFSerialization(t *testing.T) {
 	}
 
 	// Compare a lookup (basic functional check)
-	if !(config.Minimal && (core.IsEliasFanoStubbed() || phf1.OffsetsNotImplemented())) { // Skip if EF or Offsets missing
+	if !(config.Minimal && phf1.OffsetsNotImplemented()) { // Skip if EF or Offsets missing
 		sampleKey := keys[numKeys/4]
 		val1 := phf1.Lookup(sampleKey)
 		val2 := phf2.Lookup(sampleKey)

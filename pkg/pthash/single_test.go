@@ -364,14 +364,7 @@ func TestSinglePHFSerialization(t *testing.T) {
 	phf1 := pthash.NewSinglePHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
 	_, err = phf1.Build(builderInst, &config)
 	if err != nil {
-		// Skip test if EliasFano is needed but stubbed
-		if core.IsEliasFanoStubbed() && config.Minimal {
-			t.Skipf("Skipping serialization test: Minimal PHF requires functional EliasFano (stub detected)")
-		}
 		// Add check for RiceEncoder/D1Array stub
-		if core.IsD1ArraySelectStubbed() {
-			t.Skipf("Skipping serialization test: RiceEncoder requires functional D1Array (stub detected)")
-		}
 		t.Fatalf("phf1.Build failed: %v", err)
 	}
 
@@ -453,18 +446,12 @@ func TestSinglePHFSerialization(t *testing.T) {
 		t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())
 	}
 
-	// Compare a lookup (basic functional check)
-	// Skip if EliasFano is needed but stubbed
-	if !(config.Minimal && core.IsEliasFanoStubbed()) && !core.IsD1ArraySelectStubbed() {
-		sampleKey := keys[numKeys/2]
-		val1 := phf1.Lookup(sampleKey)
-		val2 := phf2.Lookup(sampleKey)
-		if val1 != val2 {
-			t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
-		} else {
-			t.Logf("Lookup check passed for key %d -> %d", sampleKey, val1)
-		}
+	sampleKey := keys[numKeys/2]
+	val1 := phf1.Lookup(sampleKey)
+	val2 := phf2.Lookup(sampleKey)
+	if val1 != val2 {
+		t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
 	} else {
-		t.Log("Skipping lookup check due to stubbed EliasFano/D1Array.")
+		t.Logf("Lookup check passed for key %d -> %d", sampleKey, val1)
 	}
 }

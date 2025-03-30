@@ -205,7 +205,6 @@ func TestCompactVectorSerialization(t *testing.T) {
 // Add this to internal/core/encoder_test.go
 
 func TestRiceSequenceSerialization(t *testing.T) {
-	// Skip if D1Array Select is stubbed
 	values := []uint64{0, 5, 10, 10, 25, 60, 66, 130} // Sample data
 	rs1 := RiceSequence{}
 	err := rs1.Encode(values)

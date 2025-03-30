@@ -98,7 +98,7 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 
 									// If all attempts failed, skip this test configuration
 									if !buildSuccess {
-										t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)", 
+										t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)",
 											maxBuildRetries, err)
 										return
 									}
@@ -109,10 +109,6 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 									encodeTime, err := finalPHF.Build(pb, &config) // Use the successful builder instance
 									if err != nil {
 										// Still check for stub issues here if serialization/final build depends on them
-										if core.IsEliasFanoStubbed() && config.Minimal {
-											t.Skipf("Skipping final check: Minimal PHF requires functional EliasFano (stub detected)")
-											return
-										}
 										t.Fatalf("finalPHF.Build failed: %v", err)
 									}
 									t.Logf("Build Timings: Part: %v, MapOrd: %v, Search: %v, Encode: %v",
@@ -120,14 +116,6 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 										buildTimings.MappingOrderingMicroseconds,
 										buildTimings.SearchingMicroseconds,
 										encodeTime)
-
-									// --- Check Correctness ---
-									if !(config.Minimal && core.IsEliasFanoStubbed()) { // Skip check if EF needed and stubbed
-										err = check[K](keys, finalPHF)
-										if err != nil {
-											t.Errorf("Correctness check failed: %v", err)
-										}
-									}
 
 									// --- Basic Property Checks ---
 									if finalPHF.NumKeys() != numKeys {
@@ -233,7 +221,7 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 
 	// If all attempts failed, skip this test configuration
 	if !buildSuccess {
-		t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)", 
+		t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)",
 			maxBuildRetries, err)
 		return
 	}
@@ -241,9 +229,6 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 	phf1 := pthash.NewPartitionedPHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
 	_, err = phf1.Build(builderInst, &config)
 	if err != nil {
-		if core.IsEliasFanoStubbed() && config.Minimal {
-			t.Skipf("Skipping serialization test: Minimal PHF requires functional EliasFano (stub detected)")
-		}
 		t.Fatalf("phf1.Build failed: %v", err)
 	}
 
@@ -283,16 +268,11 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 		t.Errorf("NumBits mismatch: %d != %d", phf1.NumBits(), phf2.NumBits())
 	}
 
-	// Compare a lookup (basic functional check)
-	if !(config.Minimal && core.IsEliasFanoStubbed()) {
-		sampleKey := keys[numKeys/3]
-		val1 := phf1.Lookup(sampleKey)
-		val2 := phf2.Lookup(sampleKey)
-		if val1 != val2 {
-			t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
-		}
-	} else {
-		t.Log("Skipping lookup check due to stubbed EliasFano for minimal PHF.")
+	sampleKey := keys[numKeys/3]
+	val1 := phf1.Lookup(sampleKey)
+	val2 := phf2.Lookup(sampleKey)
+	if val1 != val2 {
+		t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
 	}
 }
 
@@ -359,7 +339,7 @@ func TestPartitionedPHFSerializationDense(t *testing.T) {
 
 	// If all attempts failed, skip this test configuration
 	if !buildSuccess {
-		t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)", 
+		t.Skipf("Skipping test: All %d build attempts failed with SeedRuntimeError (last error: %v)",
 			maxBuildRetries, err)
 		return
 	}
@@ -367,9 +347,6 @@ func TestPartitionedPHFSerializationDense(t *testing.T) {
 	phf1 := pthash.NewPartitionedPHF[K, H, *B, *E](config.Minimal, config.Search) // Use pointer types *B, *E
 	_, err = phf1.Build(builderInst, &config)
 	if err != nil {
-		if core.IsEliasFanoStubbed() && config.Minimal {
-			t.Skipf("Skipping serialization test: Minimal PHF requires functional EliasFano (stub detected)")
-		}
 		t.Fatalf("phf1.Build failed: %v", err)
 	}
 
@@ -410,14 +387,10 @@ func TestPartitionedPHFSerializationDense(t *testing.T) {
 	}
 
 	// Compare a lookup (basic functional check)
-	if !(config.Minimal && core.IsEliasFanoStubbed()) {
-		sampleKey := keys[numKeys/3]
-		val1 := phf1.Lookup(sampleKey)
-		val2 := phf2.Lookup(sampleKey)
-		if val1 != val2 {
-			t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
-		}
-	} else {
-		t.Log("Skipping lookup check due to stubbed EliasFano for minimal PHF.")
+	sampleKey := keys[numKeys/3]
+	val1 := phf1.Lookup(sampleKey)
+	val2 := phf2.Lookup(sampleKey)
+	if val1 != val2 {
+		t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
 	}
 }

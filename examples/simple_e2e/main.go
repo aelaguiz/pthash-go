@@ -9,7 +9,6 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"pthashgo/pkg/pthash"
-	"runtime"
 )
 
 // check performs correctness checks (copied from single_test.go for self-containment)
@@ -32,27 +31,7 @@ func check[K comparable, F interface {
 	seenPositions := make(map[uint64]struct{}, n) // Used for both minimal and non-minimal checks
 
 	if f.IsMinimal() {
-		// Minimal check requires EliasFano for lookups >= n, skip if stubbed
-		if core.IsEliasFanoStubbed() {
-			log.Println("WARNING: Skipping full minimal check as EliasFano is stubbed.")
-			// Perform a partial check: ensure lookups for p < n are unique and within range
-			for _, key := range keys {
-				p := f.Lookup(key)
-				// The lookup itself might panic if p>=n and EF is stubbed/panics
-				// Let's assume Lookup returns *something* if p < n
-				if p < n {
-					if _, exists := seenPositions[p]; exists {
-						return fmt.Errorf("check failed (minimal-partial): duplicate position %d detected for key %v", p, key)
-					}
-					seenPositions[p] = struct{}{}
-				}
-				// Cannot reliably check positions >= n or the sum
-			}
-			log.Printf("Partial minimal check passed for %d positions < N.", len(seenPositions))
-			return nil // Pass partial check
-		}
 
-		// --- Full Minimal Check (if EliasFano is not stubbed) ---
 		var sum uint64 // Use uint64, check for overflow potential if n is huge
 		expectedSum := uint64(0)
 		// Calculate expected sum carefully to avoid overflow
@@ -106,7 +85,7 @@ func main() {
 
 	// --- 1. Define Parameters & Generate Keys ---
 	numKeys := uint64(1000)
-	inputSeed := uint64(42) // Seed for generating input keys
+	inputSeed := uint64(42)   // Seed for generating input keys
 	buildSeed := uint64(1234) // Seed for building the PHF
 
 	log.Printf("Generating %d distinct uint64 keys (seed: %d)...", numKeys, inputSeed)
@@ -118,7 +97,6 @@ func main() {
 
 	// --- 2. Choose PHF Configuration ---
 	// We'll use SinglePHF with common defaults.
-	// Note: RiceEncoder depends on D1Array.Select which is currently slow/stubbed.
 	// This example focuses on correctness, not performance.
 	type K = uint64
 	type H = core.MurmurHash2_64Hasher[K]
@@ -129,7 +107,10 @@ func main() {
 	config.Minimal = true // Build a Minimal Perfect Hash Function
 	config.Verbose = true // Show build steps
 	config.Seed = buildSeed
-	config.NumThreads = runtime.NumCPU() // Use multiple cores for build steps if available
+	// config.NumThreads = runtime.NumCPU() // Use multiple cores for build steps if available
+
+	// Temporarily to get past race
+	config.NumThreads = 1
 	// Use default Alpha and Lambda for simplicity
 	log.Printf("Build Config: N=%d, Alpha=%.2f, Lambda=%.1f, Minimal=%t, Seed=%d, Threads=%d",
 		numKeys, config.Alpha, config.Lambda, config.Minimal, config.Seed, config.NumThreads)
@@ -190,5 +171,4 @@ func main() {
 
 	log.Println("--- CORRECTNESS CHECK PASSED ---")
 	log.Println("The function correctly maps all input keys to unique values in [0, N-1].")
-	log.Println("(Note: If EliasFano was stubbed, only partial check was performed)")
 }

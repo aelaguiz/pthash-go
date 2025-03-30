@@ -1,13 +1,17 @@
 #!/bin/bash
 
 # Script to list all failing tests in the project
-# Usage: ./scripts/list_failing_tests.sh [package_pattern]
+# Usage: ./scripts/list_failing_tests.sh [package_pattern] [max_output_lines]
 # Tests are run with race detection enabled
 
 # Set default package pattern if not provided
 PACKAGE_PATTERN=${1:-"./..."}
 
+# Set default max output lines if not provided
+MAX_OUTPUT_LINES=${2:-100}
+
 echo "Running tests for pattern: $PACKAGE_PATTERN with 30s timeout and race detection"
+echo "Max output lines per failing test: $MAX_OUTPUT_LINES"
 echo "======================="
 
 # Run tests and capture output
@@ -64,6 +68,11 @@ if [ -s "$TIMEOUT_FAIL_FILE" ]; then
     done
     
     echo "======================="
+    
+    # Show limited context around timeouts
+    echo "Timeout Context (truncated to $MAX_OUTPUT_LINES lines per timeout):"
+    echo "$TEST_OUTPUT" | grep -B5 -A$MAX_OUTPUT_LINES "panic: test timed out after" | head -n $MAX_OUTPUT_LINES
+    echo "======================="
     echo ""
     
     # Add timeout test names to the list of failing tests
@@ -94,14 +103,14 @@ if [ -s "$PANIC_FAIL_FILE" ]; then
     if [ -n "$PANIC_PACKAGES" ]; then
         echo "$PANIC_PACKAGES" | while read -r package; do
             echo "Package: $package"
-            # Extract panic details for this package
-            PACKAGE_PANIC=$(echo "$TEST_OUTPUT" | grep -A15 "^==== $package ====" | grep -A15 "panic: " | head -10)
+            # Extract panic details for this package, limiting output
+            PACKAGE_PANIC=$(echo "$TEST_OUTPUT" | grep -A$MAX_OUTPUT_LINES "^==== $package ====" | grep -A$MAX_OUTPUT_LINES "panic: " | head -$MAX_OUTPUT_LINES)
             echo "$PACKAGE_PANIC"
             echo ""
         done
     else
-        # If we didn't find package headers but did find panics, just show the panics
-        PANIC_SNIPPET=$(cat "$PANIC_FAIL_FILE" | head -15)
+        # If we didn't find package headers but did find panics, just show the panics (limited)
+        PANIC_SNIPPET=$(cat "$PANIC_FAIL_FILE" | head -$MAX_OUTPUT_LINES)
         echo "$PANIC_SNIPPET"
         echo ""
     fi
@@ -157,6 +166,60 @@ while read -r test_name; do
     grep -r "func $test_name(" --include="*.go" ./internal ./pkg | sed 's/func //' | awk '{print "  File: " $1}'
     echo ""
 done < "$TEMP_FILE"
+
+# Extract and show limited output from failing tests
+if [ -s "$TEMP_FILE" ]; then
+    echo ""
+    echo "Failing Test Output (Truncated):"
+    echo "======================="
+    
+    while read -r test_name; do
+        # Skip empty lines
+        if [ -z "$test_name" ]; then
+            continue
+        fi
+        
+        echo "Test Output for: $test_name"
+        echo "--------------------"
+        
+        # Handle both main tests and subtests by checking different patterns
+        # First try exact test name
+        TEST_OUTPUT_SECTION=$(echo "$TEST_OUTPUT" | awk -v test="$test_name" '
+            # Look for exact test name or subtest containing this name
+            $0 ~ "=== RUN   " test "$" || $0 ~ "=== RUN   " test "/" {flag=1; print; next}
+            # Also match FAIL lines for this test
+            $0 ~ "--- FAIL: " test " " || $0 ~ "--- FAIL: " test "/" {flag=1; print; next}
+            # Stop when we see another test start or end
+            flag && /^=== (RUN|PAUSE|CONT|PASS|FAIL|SKIP)/ && !($0 ~ test "/") {flag=0}
+            # Print everything in between
+            flag {print}
+        ')
+        
+        # If we found output, show the last MAX_OUTPUT_LINES lines
+        if [ -n "$TEST_OUTPUT_SECTION" ]; then
+            TOTAL_LINES=$(echo "$TEST_OUTPUT_SECTION" | wc -l)
+            if [ $TOTAL_LINES -gt $MAX_OUTPUT_LINES ]; then
+                echo "$TEST_OUTPUT_SECTION" | tail -n $MAX_OUTPUT_LINES
+                echo "... (output truncated, showing last $MAX_OUTPUT_LINES of $TOTAL_LINES lines)"
+            else
+                echo "$TEST_OUTPUT_SECTION"
+            fi
+        else
+            # Try to find any related output by grepping for the test name
+            TEST_RELATED_OUTPUT=$(echo "$TEST_OUTPUT" | grep -A$MAX_OUTPUT_LINES -B3 "$test_name" | head -$MAX_OUTPUT_LINES)
+            if [ -n "$TEST_RELATED_OUTPUT" ]; then
+                echo "$TEST_RELATED_OUTPUT"
+                echo "... (output might be incomplete, showing grep context)"
+            else
+                echo "No specific output found for this test."
+            fi
+        fi
+        
+        echo ""
+    done < "$TEMP_FILE"
+    
+    echo "======================="
+fi
 
 # Generate a command to run only failing tests
 if [ -s "$TEMP_FILE" ]; then
