@@ -339,6 +339,15 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 			di.Encoders[i] = newInstance.Interface().(E)
 		}
 		
+		// Handle pointer allocation if E is a pointer type
+		var zeroE E
+		typeE := reflect.TypeOf(zeroE)
+		if typeE != nil && typeE.Kind() == reflect.Ptr {
+			elemType := typeE.Elem()
+			newInstance := reflect.New(elemType)
+			di.Encoders[i] = newInstance.Interface().(E)
+		}
+		
 		// Unmarshal into the address of the (potentially newly allocated) element
 		err := serial.TryUnmarshal(&di.Encoders[i], data[offset:offset+int(encLen)])
 		if err != nil {
