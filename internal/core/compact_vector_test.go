@@ -268,8 +268,12 @@ func TestEliasFanoSerialization(t *testing.T) {
 func TestDiffEncoderSerialization(t *testing.T) {
 	values := []uint64{0, 10, 15, 30}
 	incr := uint64(8)
-	de1 := DiffEncoder[*CompactEncoder]{} // Use concrete CompactEncoder ptr
-	err := de1.Encode(values, incr)
+	// E is *CompactEncoder, so DiffEncoder stores a *CompactEncoder directly
+	de1 := DiffEncoder[*CompactEncoder]{}
+	// Initialize the Encoder field since E is a pointer type
+	de1.Encoder = &CompactEncoder{}
+
+	err := de1.Encode(values, incr) // Encode uses de1.Encoder
 	if err != nil {
 		if err.Error() == "CompactEncoder.Encode: CompactVector not implemented" {
 			t.Skip("Skipping DiffEncoderSerialization test: CompactEncoder is stubbed")
@@ -277,12 +281,13 @@ func TestDiffEncoderSerialization(t *testing.T) {
 		t.Fatalf("de1.Encode failed: %v", err)
 	}
 
-	data, err := serial.TryMarshal(&de1) // Marshal pointer
+	data, err := serial.TryMarshal(&de1) // Marshal pointer to DiffEncoder
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 
 	de2 := DiffEncoder[*CompactEncoder]{} // Create empty target
+	// Unmarshal will allocate the inner *CompactEncoder if needed via its UnmarshalBinary
 	err = serial.TryUnmarshal(&de2, data)
 	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
@@ -292,11 +297,14 @@ func TestDiffEncoderSerialization(t *testing.T) {
 	if de1.Increment != de2.Increment || de1.Size() != de2.Size() {
 		t.Errorf("Metadata mismatch")
 	}
-	if (de1.encoderPtr == nil) != (de2.encoderPtr == nil) {
+	// Access the 'Encoder' field directly
+	if (de1.Encoder == nil) != (de2.Encoder == nil) {
 		t.Errorf("Underlying encoder presence mismatch")
 	}
-	if de1.encoderPtr != nil && de2.encoderPtr != nil {
-		if (*de1.encoderPtr).NumBits() != (*de2.encoderPtr).NumBits() {
+	// Compare NumBits only if both are non-nil
+	if de1.Encoder != nil && de2.Encoder != nil {
+		// Call NumBits directly on the Encoder field
+		if de1.Encoder.NumBits() != de2.Encoder.NumBits() {
 			t.Errorf("Underlying encoder NumBits mismatch")
 		}
 	}
