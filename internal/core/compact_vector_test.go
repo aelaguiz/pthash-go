@@ -30,13 +30,24 @@ func TestCompactVectorBasic(t *testing.T) {
 			if cv.width != tc.w {
 				t.Errorf("Expected width %d, got %d", tc.w, cv.width)
 			}
-			expectedBits := uint64(0)
-			if tc.n > 0 && tc.w > 0 {
-				expectedWords := (tc.n*uint64(tc.w) + 63) / 64
-				expectedBits = expectedWords * 64
-			}
-			if cv.NumBitsStored() != expectedBits {
-				t.Errorf("Expected stored bits %d, got %d", expectedBits, cv.NumBitsStored())
+			
+			// Enhanced checks for width=0
+			if tc.w == 0 {
+				if cv.data.Size() != 0 {
+					t.Errorf("W=0: Expected underlying BitVector size 0, got %d", cv.data.Size())
+				}
+				if cv.NumBitsStored() != 0 {
+					t.Errorf("W=0: Expected NumBitsStored 0, got %d", cv.NumBitsStored())
+				}
+			} else {
+				expectedBits := uint64(0)
+				if tc.n > 0 && tc.w > 0 {
+					expectedWords := (tc.n*uint64(tc.w) + 63) / 64
+					expectedBits = expectedWords * 64
+				}
+				if cv.NumBitsStored() != expectedBits {
+					t.Errorf("Expected stored bits %d, got %d", expectedBits, cv.NumBitsStored())
+				}
 			}
 
 			// Test setting and getting zeros (should always work)
@@ -48,6 +59,11 @@ func TestCompactVectorBasic(t *testing.T) {
 				if cv.Access(i) != 0 {
 					t.Errorf("Value at index %d not zero after setting zero", i)
 				}
+			}
+			
+			// Special test for width=0: setting non-zero should panic
+			if tc.w == 0 && tc.n > 0 {
+				assertPanic(t, fmt.Sprintf("Set(0, 1) W=0, N=%d", tc.n), func() { cv.Set(0, 1) })
 			}
 		})
 	}
