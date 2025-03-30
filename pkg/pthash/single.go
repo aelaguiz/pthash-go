@@ -104,16 +104,26 @@ func (f *SinglePHF[K, H, B, E]) Build(
 
 	// --- Encode Pilots ---
 	pilotsData := b.Pilots() // Get slice []uint64
-	log.Printf("[DEBUG SPHF.Build] Before 'var encoder E': f.pilots type=%T, f.pilots is nil=%t", f.pilots, reflect.ValueOf(f.pilots).IsNil())
+	log.Printf("[DEBUG SPHF.Build] Before Encode: f.pilots type=%T, f.pilots is nil=%t", f.pilots, reflect.ValueOf(f.pilots).IsNil())
 
-	// Need to create a new instance of the encoder E to call Encode on.
-	// Assuming E has a zero value that's usable or a New() function.
-	var encoder E // Create a new zero-value encoder instance
-	log.Printf("[DEBUG SPHF.Build] After 'var encoder E': encoder type=%T, encoder is nil=%t", encoder, reflect.ValueOf(encoder).IsNil())
-
-	// If E requires specific initialization, this needs adjustment.
-	f.pilots = encoder
-	log.Printf("[DEBUG SPHF.Build] After 'f.pilots = encoder': f.pilots type=%T, f.pilots is nil=%t", f.pilots, reflect.ValueOf(f.pilots).IsNil())
+	// Ensure f.pilots is allocated if it's a pointer type and currently nil
+	// (This check is defensive, the constructor should handle it, but it doesn't hurt)
+	var zeroE E
+	typeE := reflect.TypeOf(zeroE)
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		if reflect.ValueOf(f.pilots).IsNil() { // Check if the existing field is nil
+			log.Printf("[WARN SPHF.Build] f.pilots was nil before Encode call, allocating...") // Should ideally not happen
+			elemType := typeE.Elem()
+			newInstance := reflect.New(elemType)
+			if !newInstance.CanInterface() {
+				return 0, fmt.Errorf("internal build error: cannot interface allocated pointer encoder for type %v", elemType)
+			}
+			f.pilots = newInstance.Interface().(E) // Allocate and assign if needed
+		}
+	} else if reflect.TypeOf(f.pilots) == nil {
+		// If it's a value type but somehow zero/nil interface, assign zero value
+		f.pilots = zeroE
+	}
 
 	// --- Call to Encode ---
 	log.Printf("[DEBUG SPHF.Build] Calling f.pilots.Encode(): f.pilots is nil=%t", reflect.ValueOf(f.pilots).IsNil())
