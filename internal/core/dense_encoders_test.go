@@ -65,7 +65,10 @@ func TestDenseMonoSerialization(t *testing.T) {
 	dm1.Encoder = &E{} // Allocate pointer
 	err := dm1.Encoder.Encode(pilots)
 	if err != nil {
-		if IsD1ArraySelectStubbed() { t.Skip("Skipping: D1Array stubbed"); return }
+		if IsD1ArraySelectStubbed() {
+			t.Skip("Skipping: D1Array stubbed")
+			return
+		}
 		t.Fatalf("Encode failed: %v", err)
 	}
 
@@ -77,7 +80,10 @@ func TestDenseMonoSerialization(t *testing.T) {
 	dm2 := DenseMono[*E]{}
 	err = dm2.UnmarshalBinary(data)
 	if err != nil {
-		if IsD1ArraySelectStubbed() { t.Skip("Skipping: D1Array stubbed"); return }
+		if IsD1ArraySelectStubbed() {
+			t.Skip("Skipping: D1Array stubbed")
+			return
+		}
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -146,7 +152,9 @@ func TestDenseInterleavedSerialization(t *testing.T) {
 		}
 		encoderPtr := &E{} // Allocate the encoder
 		err := encoderPtr.Encode(pilots)
-		if err != nil { t.Fatalf("Encode failed: %v", err) }
+		if err != nil {
+			t.Fatalf("Encode failed: %v", err)
+		}
 		di1.Encoders[b] = &encoderPtr // Store address of pointer
 	}
 
