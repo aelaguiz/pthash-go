@@ -377,75 +377,76 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	f.m128[1] = binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8 // High
 
-	// 3. Read Bucketer
-	if offset+8 > len(data) {
-		return io.ErrUnexpectedEOF
-	}
-	bucketerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
-	bucketerEndOffset := offset + int(bucketerLen)
-	if uint64(bucketerEndOffset) > uint64(len(data)) {
-		return io.ErrUnexpectedEOF
-	}
-	// --- FIX START ---
-	var zeroB B                          // Get zero value of type B
-	typeB := reflect.TypeOf(zeroB)       // Get reflect.Type
-	targetBucketerPtr := &f.bucketer     // Default: address for value types
+	// --- Component Reading with Reflection Fix ---
 
-	if typeB != nil && typeB.Kind() == reflect.Ptr {
-		// B is a pointer type (e.g., *core.SkewBucketer)
-		elemType := typeB.Elem()                 // Get underlying struct type (e.g., core.SkewBucketer)
-		newInstance := reflect.New(elemType)     // Create *core.SkewBucketer as reflect.Value
-		f.bucketer = newInstance.Interface().(B) // Assign the new pointer to f.bucketer
-		targetBucketerPtr = f.bucketer           // Pass the pointer itself to TryUnmarshal
+	// Helper function to unmarshal into a generic field
+	unmarshalComponent := func(fieldPtr interface{}, description string) (int, error) {
+		if offset+8 > len(data) {
+			return offset, fmt.Errorf("%s length read: %w", description, io.ErrUnexpectedEOF)
+		}
+		compLen := binary.LittleEndian.Uint64(data[offset : offset+8])
+		offset += 8
+		endOffset := offset + int(compLen)
+		if uint64(endOffset) > uint64(len(data)) {
+			return offset, fmt.Errorf("%s data bounds: %w", description, io.ErrUnexpectedEOF)
+		}
+
+		// Use reflection to check if fieldPtr points to a pointer type
+		fieldValue := reflect.ValueOf(fieldPtr).Elem() // Get the value fieldPtr points to (f.bucketer, f.pilots)
+		fieldType := fieldValue.Type()                 // Get its type (B or E)
+		targetPtr := fieldPtr                          // Default target for TryUnmarshal
+
+		if fieldType != nil && fieldType.Kind() == reflect.Ptr {
+			// The field itself is a pointer type (e.g., f.bucketer is *core.SkewBucketer)
+			// We need to allocate it if it's currently nil.
+			if fieldValue.IsNil() {
+				elemType := fieldType.Elem()         // Get the underlying struct type (e.g., core.SkewBucketer)
+				newInstance := reflect.New(elemType) // Create *core.SkewBucketer as reflect.Value
+				fieldValue.Set(newInstance)          // Use reflection to set the field f.bucketer = newInstance
+			}
+			// For pointer types, TryUnmarshal needs the pointer itself (which is now non-nil)
+			targetPtr = fieldValue.Interface() // Pass the pointer value (e.g., *core.SkewBucketer)
+		} else if fieldType != nil {
+			// The field is a value type (e.g., f.bucketer is core.UniformBucketer)
+			// TryUnmarshal needs the address of the value type (&f.bucketer)
+			// targetPtr is already correct (&f.bucketer) in this case.
+		} else {
+			// Should not happen if generic types are well-defined
+			return offset, fmt.Errorf("could not determine type for %s field", description)
+		}
+
+		// Unmarshal into the target pointer
+		err := serial.TryUnmarshal(targetPtr, data[offset:endOffset])
+		if err != nil {
+			return offset, fmt.Errorf("%s unmarshal: %w", description, err)
+		}
+
+		return endOffset, nil // Return the new offset
 	}
-	// Now call TryUnmarshal with the correct pointer (either the field address or the newly allocated pointer)
-	err := serial.TryUnmarshal(targetBucketerPtr, data[offset:bucketerEndOffset])
-	// --- FIX END ---
+
+	var err error
+
+	// 3. Read Bucketer
+	offset, err = unmarshalComponent(&f.bucketer, "bucketer")
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal bucketer: %w", err)
+		return err
 	}
-	offset = bucketerEndOffset
 
 	// 4. Read Pilots
-	if offset+8 > len(data) {
-		return io.ErrUnexpectedEOF
-	}
-	pilotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
-	offset += 8
-	pilotsEndOffset := offset + int(pilotsLen)
-	if uint64(pilotsEndOffset) > uint64(len(data)) {
-		return io.ErrUnexpectedEOF
-	}
-	// --- FIX START ---
-	var zeroE E                      // Get zero value of type E
-	typeE := reflect.TypeOf(zeroE)   // Get reflect.Type
-	targetPilotsPtr := &f.pilots     // Default: address for value types
-
-	if typeE != nil && typeE.Kind() == reflect.Ptr {
-		// E is a pointer type (e.g., *core.RiceEncoder)
-		elemType := typeE.Elem()                 // Get underlying type (e.g., core.RiceEncoder)
-		newInstance := reflect.New(elemType)     // Create *core.RiceEncoder as reflect.Value
-		f.pilots = newInstance.Interface().(E)   // Assign the new pointer to f.pilots
-		targetPilotsPtr = f.pilots               // Pass the pointer itself to TryUnmarshal
-	}
-	// Now call TryUnmarshal with the correct pointer
-	err = serial.TryUnmarshal(targetPilotsPtr, data[offset:pilotsEndOffset])
-	// --- FIX END ---
+	offset, err = unmarshalComponent(&f.pilots, "pilots")
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal pilots: %w", err)
+		return err
 	}
-	offset = pilotsEndOffset
 
-	// 5. Read Free Slots
+	// 5. Read Free Slots (Already allocates correctly, uses specific type)
 	if offset+8 > len(data) {
-		return io.ErrUnexpectedEOF
+		return fmt.Errorf("freeSlots length: %w", io.ErrUnexpectedEOF)
 	}
 	freeSlotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
 	freeSlotsEndOffset := offset + int(freeSlotsLen)
 	if uint64(freeSlotsEndOffset) > uint64(len(data)) {
-		return io.ErrUnexpectedEOF
+		return fmt.Errorf("freeSlots data bounds: %w", io.ErrUnexpectedEOF)
 	}
 	if freeSlotsLen > 0 {
 		f.freeSlots = core.NewEliasFano() // Create instance before unmarshaling
