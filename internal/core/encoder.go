@@ -543,6 +543,19 @@ func (ef *EliasFano) NumBits() uint64 {
 }
 func (ef *EliasFano) Name() string { return "EF" }
 
+// GetCompactVector returns the internal lowerBits CompactVector (for testing).
+func (ef *EliasFano) GetCompactVector() *CompactVector {
+	return ef.lowerBits
+}
+
+// GetUpperBitsBitVector returns the internal upperBits BitVector from the D1Array (for testing).
+func (ef *EliasFano) GetUpperBitsBitVector() *BitVector {
+	if ef.upperBitsSelect == nil {
+		return nil
+	}
+	return ef.upperBitsSelect.bv // Assuming bv is the field name in D1Array
+}
+
 func (ef *EliasFano) MarshalBinary() ([]byte, error) {
 	// Serialize numValues, universe, numLowBits, lowerBits, upperBitsSelect
 	lbData, err := serial.TryMarshal(ef.lowerBits)
