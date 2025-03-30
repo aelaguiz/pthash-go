@@ -167,20 +167,21 @@ func (f *DensePartitionedPHF[K, H, B, E]) Lookup(key K) uint64 {
 
 	// 2. Find partition
 	partitionIdx := f.partitioner.Bucket(hash.Mix())
-	if partitionIdx >= f.numPartitions {
-		panic(fmt.Sprintf("partition index %d out of bounds (%d)", partitionIdx, f.numPartitions))
+	partitionIdxUint64 := uint64(partitionIdx)
+	if partitionIdxUint64 >= f.numPartitions {
+		panic(fmt.Sprintf("partition index %d out of bounds (%d)", partitionIdxUint64, f.numPartitions))
 	}
 
 	// 3. Get partition range start/end using diff-encoded offsets
-	partitionOffset := f.offsets.Access(partitionIdx)
-	nextPartitionOffset := f.offsets.Access(partitionIdx + 1)
+	partitionOffset := f.offsets.Access(partitionIdxUint64)
+	nextPartitionOffset := f.offsets.Access(partitionIdxUint64 + 1)
 	partitionSize := nextPartitionOffset - partitionOffset // Size of the hash range for this partition
 
 	// 4. Find sub-bucket within partition
 	subBucket := f.subBucketer.Bucket(hash.First()) // Use hash.First() for sub-bucket
 
 	// 5. Get pilot using dense access
-	pilot := f.pilots.AccessDense(partitionIdx, uint64(subBucket))
+	pilot := f.pilots.AccessDense(partitionIdxUint64, uint64(subBucket))
 
 	// 6. Calculate position within partition using search type
 	var pSub uint64 // Position relative to partition start (in [0, partitionSize))

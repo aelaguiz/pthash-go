@@ -188,14 +188,15 @@ func (f *PartitionedPHF[K, H, B, E]) Lookup(key K) uint64 {
 
 	// 2. Determine the partition
 	partitionIdx := f.partitioner.Bucket(hash.Mix())
-	if partitionIdx >= uint64(len(f.partitions)) {
-		panic(fmt.Sprintf("partition index %d out of bounds (%d)", partitionIdx, len(f.partitions)))
+	partitionIdxUint64 := uint64(partitionIdx)
+	if partitionIdxUint64 >= uint64(len(f.partitions)) {
+		panic(fmt.Sprintf("partition index %d out of bounds (%d)", partitionIdxUint64, len(f.partitions)))
 	}
 
 	// 3. Lookup within the sub-PHF of that partition
-	part := f.partitions[partitionIdx]
+	part := f.partitions[partitionIdxUint64]
 	if part.phf == nil {
-		panic(fmt.Sprintf("lookup error: partition %d has nil sub-PHF", partitionIdx))
+		panic(fmt.Sprintf("lookup error: partition %d has nil sub-PHF", partitionIdxUint64))
 	}
 	// We need to pass the *original hash* to the sub-PHF, not the key again.
 	// Modify SinglePHF to have a LookupFromHash method? Or pass hash here.
