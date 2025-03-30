@@ -260,7 +260,7 @@ func searchParallelXOR(
 	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
 	config *core.BuildConfig,
 	bucketsIt *bucketsIteratorT,
-	taken *core.BitVectorBuilder, // Requires concurrent-safe Set/Get
+	taken *core.BitVectorBuilder, // Now internally thread-safe
 	pilots PilotsBuffer, // Requires concurrent-safe EmplaceBack
 	logger *SearchLogger,
 	hashedPilotsCache []uint64,
@@ -271,11 +271,9 @@ func searchParallelXOR(
 
 	log.Printf("RACE-DEBUG: Starting searchParallelXOR with %d threads", numThreads)
 
-	// Need concurrent-safe access to taken bits and pilots buffer.
-	// Using Mutex for simplicity, although atomics or sharding might be faster.
-	var takenMu sync.Mutex
+	// Keep mutexes for other shared resources
 	var pilotsMu sync.Mutex // Assuming PilotsBuffer is not inherently safe
-	var loggerMu sync.Mutex // Add mutex for logger to fix race
+	var loggerMu sync.Mutex // Mutex for logger to fix race
 
 	// Wrap pilots buffer
 	pilotsEmplaceBack := func(bucketID core.BucketIDType, pilot uint64) {
@@ -316,129 +314,72 @@ func searchParallelXOR(
 			bucketID := bucket.ID()
 			payloads := bucket.Payloads()
 
-			// --- Mimic C++ retry logic ---
-			// This part is tricky to translate directly and safely.
-			// The C++ code seems to involve active waiting and re-checking.
-			currentPilot := uint64(0)
-			pilotChecked := false // Did we find a potential pilot in the last inner loop?
+			// Simplified pilot search logic - no need for outer retry loop
+			foundPilotForBucket := false
+			
+			for currentPilot := uint64(0); ; currentPilot++ {
+				hashedPilot := uint64(0)
+				if currentPilot < searchCacheSize {
+					hashedPilot = hashedPilotsCache[currentPilot]
+				} else {
+					hashedPilot = core.DefaultHash64(currentPilot, seed)
+				}
 
-			for { // Outer retry loop for this bucket
+				positions = positions[:0] // Clear thread-local buffer
+				optimisticCheckFailed := false
 
-				// Find a potential pilot (inner loop)
-				foundPotentialPilot := false
-				if !pilotChecked { // Only search if previous check failed or first time
-					for pSearch := currentPilot; ; pSearch++ {
-						hashedPilot := uint64(0)
-						if pSearch < searchCacheSize {
-							hashedPilot = hashedPilotsCache[pSearch]
-						} else {
-							hashedPilot = core.DefaultHash64(pSearch, seed)
-						}
-
-						positions = positions[:0] // Clear thread-local buffer
-						collisionFound := false
-
-						for _, pld := range payloads {
-							hash := pld
-							p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
-							// Optimistic check without lock - might be stale but that's OK
-							// Final verification will happen under lock
-							if taken.Get(p) {
-								collisionFound = true
-								break
-							}
-							positions = append(positions, p)
-						}
-
-						if collisionFound {
-							continue
-						} // Try next pilot value
-
-						// Check in-bucket
-						sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
-						inBucketCollision := false
-						for i := 1; i < len(positions); i++ {
-							if positions[i] == positions[i-1] {
-								inBucketCollision = true
-								break
-							}
-						}
-						if inBucketCollision {
-							continue
-						} // Try next pilot value
-
-						// Potential pilot found
-						currentPilot = pSearch
-						pilotChecked = true
-						foundPotentialPilot = true
-						break // Exit pilot search loop
-					} // End pilot search loop (for pSearch)
-
-				} else { // pilotChecked was true, just re-verify positions against 'taken'
-					foundPotentialPilot = true // Assume it's still potentially valid
-					for _, p := range positions {
-						// Optimistic check without lock - might be stale but that's OK
-						if taken.Get(p) {
-							pilotChecked = false // Collision detected, must search again
-							foundPotentialPilot = false
-							break
-						}
+				for _, pld := range payloads {
+					hash := pld
+					p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
+					
+					// Optimistic check - thread-safe now
+					if taken.Get(p) {
+						optimisticCheckFailed = true
+						break
 					}
+					positions = append(positions, p)
 				}
 
-				if !foundPotentialPilot {
-					// This should ideally not happen if search loop runs correctly
-					// If it does, restart search from currentPilot
-					pilotChecked = false // Force re-search
-					continue             // Retry finding a pilot for this bucket
+				if optimisticCheckFailed {
+					continue // Try next pilot value
 				}
 
-				// --- Attempt to commit the found pilot ---
-				// This requires ensuring no other thread grabbed conflicting slots
-				// between our check and our commit. A global lock is simplest but slow.
-				// C++ used atomic compare-and-swap on bitmap words or similar.
-				// Let's try a simpler lock around the commit phase.
-
-				takenMu.Lock() // Lock before final check and commit
-
-				// MOVED INSIDE LOCK: Final position check under lock for atomicity
-				commitOk := true
-				for _, p := range positions {
-					if taken.Get(p) { // Final check WHILE holding lock
-						log.Printf("Worker: Thread %d found conflict during locked check for bucket %d", tid, bucketID)
-						commitOk = false
+				// Check in-bucket collisions
+				sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+				inBucketCollision := false
+				for i := 1; i < len(positions); i++ {
+					if positions[i] == positions[i-1] {
+						inBucketCollision = true
 						break
 					}
 				}
-
-				if commitOk {
-					// Commit phase: Mark bits and store pilot 
-					log.Printf("Worker: Thread %d committing positions for bucket %d", tid, bucketID)
-					for _, p := range positions {
-						taken.Set(p) // Direct call under lock
-					}
-					takenMu.Unlock() // Unlock after modifying taken
-
-					// Store pilot (also needs safety if buffer isn't safe)
-					pilotsEmplaceBack(bucketID, currentPilot)
-
-					// RACE-DEBUG: Lock logger during update
-					loggerMu.Lock()
-					logger.Update(localBucketIdx, bucketSize) // Log progress
-					loggerMu.Unlock()
-
-					break // Success for this bucket, exit outer retry loop
-				} else {
-					// Conflict detected during commit check
-					takenMu.Unlock()     // Unlock
-					pilotChecked = false // Our potential pilot is invalid, need to search again
-					// currentPilot remains the same, will restart search from there
-					runtime.Gosched() // Yield to potentially allow conflicting thread to finish
-					continue          // Retry finding a pilot for this bucket (outer loop)
+				if inBucketCollision {
+					continue // Try next pilot value
 				}
-			} // End outer retry loop for bucket
-		} // End main loop for fetching buckets
-	} // End worker func
+
+				// Pilot found - directly set bits (thread-safe now)
+				for _, p := range positions {
+					taken.Set(p)
+				}
+
+				// Store the pilot
+				pilotsEmplaceBack(bucketID, currentPilot)
+
+				// Update progress
+				loggerMu.Lock()
+				logger.Update(localBucketIdx, bucketSize)
+				loggerMu.Unlock()
+
+				foundPilotForBucket = true
+				break // Success for this bucket
+			}
+
+			if !foundPilotForBucket {
+				log.Printf("Worker: Thread %d couldn't find pilot for bucket %d - this shouldn't happen", tid, bucketID)
+				// This would only happen if we hit limitations not caught in the search loop
+			}
+		}
+	}
 
 	// Start workers
 	log.Printf("Starting %d worker goroutines for parallel search", numThreads)
@@ -450,15 +391,9 @@ func searchParallelXOR(
 	wg.Wait()
 
 	// Check if all buckets were processed
-	// Note: Due to potential retries and non-deterministic order,
-	// checking nextBucketIdx against numNonEmptyBuckets might not be perfectly accurate
-	// if errors occurred, but it's a basic sanity check.
 	finalIdx := nextBucketIdx.Load()
 	if finalIdx < numNonEmptyBuckets {
 		util.Log(config.Verbose, "Warning: Parallel search finished, processed ~%d buckets, expected %d. Potential contention or error.", finalIdx, numNonEmptyBuckets)
-		// If this happens frequently, the retry/locking logic might need refinement or a different approach.
-		// Could potentially indicate a seed failure if some buckets never found a pilot.
-		// For now, we don't explicitly return SeedRuntimeError here, but it's a possibility.
 	}
 
 	return nil

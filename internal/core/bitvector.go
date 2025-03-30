@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 )
 
 // BitVector provides basic bit manipulation capabilities.
@@ -151,7 +152,9 @@ func (bv *BitVector) UnmarshalBinary(data []byte) error {
 // --- BitVector Builder ---
 
 // BitVectorBuilder helps construct a BitVector incrementally.
+// Thread-safe for concurrent Get/Set operations.
 type BitVectorBuilder struct {
+	mu       sync.Mutex // Mutex to protect words and size
 	words    []uint64
 	capacity uint64 // Capacity in bits
 	size     uint64 // Current size in bits
@@ -161,155 +164,144 @@ type BitVectorBuilder struct {
 func NewBitVectorBuilder(initialCapacity uint64) *BitVectorBuilder {
 	numWords := (initialCapacity + 63) / 64
 	return &BitVectorBuilder{
-		words:    make([]uint64, 0, numWords), // Start with 0 length, but reserve capacity
-		capacity: initialCapacity,
-		size:     0,
+		words:    make([]uint64, numWords), // Allocate directly to avoid races during grow checks
+		capacity: numWords * 64,           // Capacity based on allocated words
+		size:     0,                       // Start with size 0 conceptually
 	}
 }
 
-// grow ensures the builder has space for at least 'needed' more bits.
-func (b *BitVectorBuilder) grow(needed uint64) {
-    oldCap := b.capacity
-    oldLen := len(b.words)
-    newSize := b.size + needed
-    shouldGrow := newSize > b.capacity
-
-    log.Printf("[DEBUG BVBuilder.grow] ENTER: needed=%d, currentSize=%d, currentCap=%d, currentLen=%d -> newSize=%d",
-        needed, b.size, oldCap, oldLen, newSize)
-
-    if shouldGrow {
-        // Double the capacity or increase by needed, whichever is larger
-        newCapacity := b.capacity * 2
-        if newCapacity < newSize {
-            newCapacity = newSize
-        }
-        numWords := (newCapacity + 63) / 64
-        log.Printf("[DEBUG BVBuilder.grow]   Growing: newCapacity=%d, newNumWords=%d", newCapacity, numWords)
-        if uint64(cap(b.words)) < numWords {
-            newWords := make([]uint64, len(b.words), numWords)
-            copy(newWords, b.words)
-            b.words = newWords
-            log.Printf("[DEBUG BVBuilder.grow]     Allocated new words slice: len=%d, cap=%d", len(b.words), cap(b.words))
-        }
-        b.capacity = newCapacity
+// grow ensures the builder has space for at least 'targetBitIndex' + 1 bits.
+// MUST be called with the lock held.
+func (b *BitVectorBuilder) grow(targetBitIndex uint64) {
+    targetCap := targetBitIndex + 1
+    if targetCap <= b.capacity {
+        return // Already have enough capacity
     }
 
-    // Ensure words slice length covers current size (potentially needed even if capacity didn't change)
-    currentNumWords := (b.size + 63) / 64
-    requiredNumWords := (newSize + 63) / 64
-    if requiredNumWords > currentNumWords && requiredNumWords > uint64(len(b.words)) {
-        if requiredNumWords <= uint64(cap(b.words)) {
-            log.Printf("[DEBUG BVBuilder.grow]   Extending slice length from %d to %d (within cap %d)", len(b.words), requiredNumWords, cap(b.words))
-            b.words = b.words[:requiredNumWords] // Extend length within capacity
-        } else {
-            // This should not happen if grow calculation is correct
-            log.Printf("[ERROR BVBuilder.grow]   Cannot extend words slice: requiredLen=%d > cap=%d", requiredNumWords, cap(b.words))
-            panic("grow calculation error")
-        }
+    // Determine new capacity (e.g., double or target, whichever is larger)
+    newCapacity := b.capacity * 2
+    if newCapacity < targetCap {
+        newCapacity = targetCap
     }
-    log.Printf("[DEBUG BVBuilder.grow] EXIT: finalCap=%d, finalLen=%d", b.capacity, len(b.words))
+    numWords := (newCapacity + 63) / 64
+    log.Printf("[DEBUG BVBuilder.grow Locked] Growing: targetBit=%d, newCapacity=%d, newNumWords=%d", targetBitIndex, newCapacity, numWords)
+
+    if numWords > uint64(cap(b.words)) {
+        // This allocation is tricky under lock, might be better to pre-allocate larger
+        // For now, create new slice and copy
+        newWords := make([]uint64, numWords)
+        copy(newWords, b.words)
+        b.words = newWords
+    } else if numWords > uint64(len(b.words)) {
+        // Extend length if within capacity
+        b.words = b.words[:numWords]
+    }
+    b.capacity = numWords * 64
 }
 
-// Get returns the bit value at the given position.
+// Get returns the bit value at the given position. Thread-safe.
 // This is used during search to check for collisions.
-// NOTE: Not safe for concurrent use without external synchronization!
 func (b *BitVectorBuilder) Get(pos uint64) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Check against conceptual size first
 	if pos >= b.size {
-		// Reading beyond current size conceptually returns 0/false
 		return false
 	}
+
 	wordIndex := pos / 64
 	bitIndex := pos % 64
+
+	// Check against actual allocated words (should be consistent if Set maintains size)
 	if wordIndex >= uint64(len(b.words)) {
-		// Accessing word that hasn't been allocated yet
-		return false
+		// This implies an internal inconsistency or race condition elsewhere
+		log.Printf("[WARN BVBuilder.Get Locked] pos %d maps to word %d, but len(words) is %d (size=%d)", pos, wordIndex, len(b.words), b.size)
+		return false // Treat as 0 if word doesn't exist yet
 	}
 	return (b.words[wordIndex] & (1 << bitIndex)) != 0
 }
 
-// Set sets the bit at the given position to 1.
+// Set sets the bit at the given position to 1. Thread-safe.
 // This is used during search to mark taken positions.
 func (b *BitVectorBuilder) Set(pos uint64) {
-	if pos >= b.capacity {
-		b.grow(pos - b.size + 1) // Grow enough to include pos
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Grow if necessary BEFORE accessing words index
+	b.grow(pos) // Grow to ensure capacity includes 'pos'
+
 	wordIndex := pos / 64
 	bitIndex := pos % 64
-	if wordIndex >= uint64(len(b.words)) { // Ensure word exists after potential grow
-		neededLen := wordIndex + 1
-		if neededLen > uint64(cap(b.words)) {
-			// Should not happen if grow worked correctly
-			panic("Set after grow failed")
-		}
-		b.words = b.words[:neededLen]
+
+	// Double check wordIndex after grow (should be fine)
+	if wordIndex >= uint64(len(b.words)) {
+		log.Printf("[ERROR BVBuilder.Set Locked] pos %d maps to word %d, but len(words) is %d even after grow (cap=%d, size=%d)", pos, wordIndex, len(b.words), b.capacity, b.size)
+		// This indicates a potential issue in grow() or concurrent modification outside locks
+		panic(fmt.Sprintf("BitVectorBuilder.Set inconsistency: cannot access word %d", wordIndex))
 	}
+
 	b.words[wordIndex] |= (1 << bitIndex)
-	if pos >= b.size { // Update size if we set a bit beyond the current end
+
+	// Update conceptual size if this position extends it
+	if pos >= b.size {
 		b.size = pos + 1
 	}
 }
 
-// PushBack appends a single bit (true=1, false=0).
+// PushBack appends a single bit (true=1, false=0). Thread-safe.
+// NOT Recommended for Concurrent Use (Append requires strict order)
 func (b *BitVectorBuilder) PushBack(bit bool) {
-    // *** ADD DETAILED LOGGING ***
+    b.mu.Lock()
+    defer b.mu.Unlock()
+    
     oldSize := b.size
     log.Printf("[DEBUG BVBuilder.PushBack] ENTER: bit=%t, oldSize=%d, capacity=%d, len(words)=%d",
         bit, oldSize, b.capacity, len(b.words))
 
-    b.grow(1) // Ensure space for 1 more bit
-
+    b.grow(b.size) // Ensure space for the next bit
     wordIndex := b.size / 64
     bitIndex := b.size % 64
-
-    // Ensure words slice is long enough AFTER potential grow
-    requiredLen := wordIndex + 1
-    if requiredLen > uint64(len(b.words)) {
-         // Extend slice length up to its capacity if needed
-         if requiredLen <= uint64(cap(b.words)) {
-             b.words = b.words[:requiredLen]
-             log.Printf("[DEBUG BVBuilder.PushBack]   Extended words slice length to %d", requiredLen)
-         } else {
-             // This indicates a problem in grow() logic
-             log.Printf("[ERROR BVBuilder.PushBack]   Cannot extend words slice: requiredLen=%d > cap=%d", requiredLen, cap(b.words))
-             panic("cannot extend words slice in PushBack")
-         }
+    
+    if wordIndex >= uint64(len(b.words)) {
+        panic("grow failed in PushBack") // Should not happen
     }
-
-    log.Printf("[DEBUG BVBuilder.PushBack]   Accessing wordIndex=%d, bitIndex=%d", wordIndex, bitIndex)
-    // Log word state BEFORE modification
-    log.Printf("[DEBUG BVBuilder.PushBack]   Word[%d] BEFORE: 0x%016x", wordIndex, b.words[wordIndex])
-
+    
     if bit {
         b.words[wordIndex] |= (1 << bitIndex)
         log.Printf("[DEBUG BVBuilder.PushBack]   Set bit to 1")
     } else {
-         // Explicitly clear the bit? Not strictly necessary if starting from 0, but safer.
-         // b.words[wordIndex] &= ^(1 << bitIndex)
-         log.Printf("[DEBUG BVBuilder.PushBack]   Set bit to 0 (no change if already 0)")
+        b.words[wordIndex] &= ^(1 << bitIndex) // Explicitly clear
+        log.Printf("[DEBUG BVBuilder.PushBack]   Set bit to 0")
     }
-
+    
     // Log word state AFTER modification
     log.Printf("[DEBUG BVBuilder.PushBack]   Word[%d] AFTER:  0x%016x", wordIndex, b.words[wordIndex])
-
-    b.size++ // Increment size AFTER accessing/setting the bit at the original size index
+    
+    b.size++ // Increment size
     log.Printf("[DEBUG BVBuilder.PushBack] EXIT: newSize=%d", b.size)
 }
 
-// AppendBits appends the lowest 'numBits' of 'val'. numBits must be <= 64.
+// AppendBits appends the lowest 'numBits' of 'val'. Thread-safe.
+// NOT Recommended for Concurrent Use (Append requires strict order)
 func (b *BitVectorBuilder) AppendBits(val uint64, numBits uint8) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	
 	if numBits == 0 {
 		return
 	}
 	if numBits > 64 {
 		panic("BitVectorBuilder.AppendBits: numBits must be <= 64")
 	}
-	b.grow(uint64(numBits))
+	
+	b.grow(b.size + uint64(numBits) - 1) // Grow to include last bit
 
 	startBit := b.size % 64
 	wordIndex := b.size / 64
 
-	if wordIndex >= uint64(len(b.words)) { // Ensure word exists
-		b.words = append(b.words, 0)
+	if wordIndex >= uint64(len(b.words)) {
+		panic("grow failed in AppendBits")
 	}
 
 	// Mask val to keep only the lowest numBits
@@ -323,8 +315,8 @@ func (b *BitVectorBuilder) AppendBits(val uint64, numBits uint8) {
 	bitsWrittenInFirst := 64 - startBit
 	if uint64(numBits) > bitsWrittenInFirst {
 		wordIndex++
-		if wordIndex >= uint64(len(b.words)) { // Ensure next word exists
-			b.words = append(b.words, 0)
+		if wordIndex >= uint64(len(b.words)) {
+			panic("grow failed in AppendBits cross-boundary")
 		}
 		b.words[wordIndex] |= (val >> bitsWrittenInFirst)
 	}
@@ -332,25 +324,37 @@ func (b *BitVectorBuilder) AppendBits(val uint64, numBits uint8) {
 }
 
 // Build creates the final BitVector. The builder is reset.
+// Not thread-safe relative to other ops.
+// Should only be called after all concurrent Sets/Gets are done.
 func (b *BitVectorBuilder) Build() *BitVector {
+	b.mu.Lock() // Lock during build to prevent races if called prematurely
+	defer b.mu.Unlock()
+
 	numWords := (b.size + 63) / 64
 	// Trim potentially overallocated words slice
 	finalBits := make([]uint64, numWords)
-	copy(finalBits, b.words)
+	copy(finalBits, b.words[:numWords]) // Copy only the words needed for final size
 
-	// Clear the builder
 	bv := &BitVector{
 		bits: finalBits,
 		size: b.size,
 	}
-	*b = BitVectorBuilder{} // Reset builder state
+	// Reset builder state
+	b.size = 0
+	b.words = nil // Allow GC
+	b.capacity = 0
 	return bv
 }
 
+// Size returns the current conceptual size (number of bits set or pushed). Thread-safe.
 func (b *BitVectorBuilder) Size() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.size
 }
 
 func (b *BitVectorBuilder) Capacity() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.capacity
 }
