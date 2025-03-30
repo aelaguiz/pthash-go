@@ -400,16 +400,20 @@ func searchParallelXOR(
 				// Let's try a simpler lock around the commit phase.
 
 				takenMu.Lock() // Lock before final check and commit
+
+				// MOVED INSIDE LOCK: Final position check under lock for atomicity
 				commitOk := true
 				for _, p := range positions {
-					if taken.Get(p) { // Final check under lock
+					if taken.Get(p) { // Final check WHILE holding lock
+						log.Printf("Worker: Thread %d found conflict during locked check for bucket %d", tid, bucketID)
 						commitOk = false
 						break
 					}
 				}
 
 				if commitOk {
-					// Commit phase: Mark bits and store pilot
+					// Commit phase: Mark bits and store pilot 
+					log.Printf("Worker: Thread %d committing positions for bucket %d", tid, bucketID)
 					for _, p := range positions {
 						taken.Set(p) // Direct call under lock
 					}
