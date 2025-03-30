@@ -718,11 +718,5 @@ func (ef *EliasFano) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// IsEliasFanoStubbed returns false as EliasFano is fully implemented.
-// This function is used in tests to determine if EliasFano-dependent tests should be skipped.
-func IsEliasFanoStubbed() bool {
-	return false
-}
-
 // --- Placeholder Dictionary/SDC/Dual etc. ---
 // Add stubs or full implementations later

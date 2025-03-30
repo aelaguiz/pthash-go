@@ -30,7 +30,7 @@ func TestCompactVectorBasic(t *testing.T) {
 			if cv.width != tc.w {
 				t.Errorf("Expected width %d, got %d", tc.w, cv.width)
 			}
-			
+
 			// Enhanced checks for width=0
 			if tc.w == 0 {
 				if cv.data.Size() != 0 {
@@ -60,7 +60,7 @@ func TestCompactVectorBasic(t *testing.T) {
 					t.Errorf("Value at index %d not zero after setting zero", i)
 				}
 			}
-			
+
 			// Special test for width=0: setting non-zero should panic
 			if tc.w == 0 && tc.n > 0 {
 				assertPanic(t, fmt.Sprintf("Set(0, 1) W=0, N=%d", tc.n), func() { cv.Set(0, 1) })
@@ -206,10 +206,6 @@ func TestCompactVectorSerialization(t *testing.T) {
 
 func TestRiceSequenceSerialization(t *testing.T) {
 	// Skip if D1Array Select is stubbed
-	if IsD1ArraySelectStubbed() {
-		t.Skip("Skipping RiceSequenceSerialization test: D1Array.Select is stubbed")
-	}
-
 	values := []uint64{0, 5, 10, 10, 25, 60, 66, 130} // Sample data
 	rs1 := RiceSequence{}
 	err := rs1.Encode(values)

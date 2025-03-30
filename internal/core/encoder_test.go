@@ -348,9 +348,6 @@ func TestCompactEncoderSerialization(t *testing.T) {
 
 // Test for RiceEncoder serialization
 func TestRiceEncoderSerialization(t *testing.T) {
-	if IsD1ArraySelectStubbed() {
-		t.Skip("Skipping RiceEncoderSerialization test: D1Array.Select is stubbed")
-	}
 	values := []uint64{0, 5, 10, 10, 25, 60}
 	re1 := &RiceEncoder{}
 	err := re1.Encode(values)
@@ -384,10 +381,6 @@ func TestRiceEncoderSerialization(t *testing.T) {
 
 // TestRiceSequenceAccess specifically targets the Access method's correctness.
 func TestRiceSequenceAccess(t *testing.T) {
-	// Skip if Select is known stubbed, as Access will definitely fail/panic.
-	if IsD1ArraySelectStubbed() {
-		t.Skip("Skipping RiceSequence Access test: D1Array.Select is stubbed.")
-	}
 
 	values := []uint64{0, 5, 10, 15, 63, 64, 65, 130, 200} // Known data
 	rs := RiceSequence{}
@@ -474,26 +467,6 @@ func TestEliasFanoAccess(t *testing.T) {
 	}
 }
 
-// TestStubbedChecks explicitly reports the status of the stub check functions.
-func TestStubbedChecks(t *testing.T) {
-	d1Stubbed := IsD1ArraySelectStubbed()
-	efStubbed := IsEliasFanoStubbed()
-
-	t.Logf("IsD1ArraySelectStubbed(): %t", d1Stubbed)
-	t.Logf("IsEliasFanoStubbed(): %t", efStubbed)
-
-	if d1Stubbed {
-		t.Log("CONFIRMATION: D1Array.Select appears to be stubbed/incomplete.")
-	} else {
-		t.Log("INFO: D1Array.Select does NOT appear to be stubbed (based on basic checks).")
-	}
-	if efStubbed {
-		t.Log("CONFIRMATION: EliasFano appears to be stubbed/incomplete (likely due to D1Array).")
-	} else {
-		t.Log("INFO: EliasFano does NOT appear to be stubbed (based on basic checks).")
-	}
-}
-
 // TestCompactEncoderZeroWidth tests the special handling of zero-width vectors
 func TestCompactEncoderZeroWidth(t *testing.T) {
 	tests := []struct {
@@ -504,7 +477,7 @@ func TestCompactEncoderZeroWidth(t *testing.T) {
 		{"EmptySlice", []uint64{}},
 		{"SingleZero", []uint64{0}},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ce := &CompactEncoder{}
@@ -512,41 +485,41 @@ func TestCompactEncoderZeroWidth(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Encode failed: %v", err)
 			}
-			
+
 			// Verify the width was set to 0
 			if ce.values.Width() != 0 {
 				t.Errorf("Expected width 0, got %d", ce.values.Width())
 			}
-			
+
 			// Verify the size matches
 			if ce.values.Size() != uint64(len(tt.values)) {
 				t.Errorf("Expected size %d, got %d", len(tt.values), ce.values.Size())
 			}
-			
+
 			// Verify NumBitsStored is minimal
 			if ce.values.NumBitsStored() != 0 {
 				t.Errorf("Expected 0 bits stored, got %d", ce.values.NumBitsStored())
 			}
-			
+
 			// Verify Access returns 0 for all indices
 			for i := uint64(0); i < ce.values.Size(); i++ {
 				if ce.Access(i) != 0 {
 					t.Errorf("Access(%d) = %d, expected 0", i, ce.Access(i))
 				}
 			}
-			
+
 			// Verify serialization roundtrip
 			data, err := ce.MarshalBinary()
 			if err != nil {
 				t.Fatalf("MarshalBinary failed: %v", err)
 			}
-			
+
 			ce2 := &CompactEncoder{}
 			err = ce2.UnmarshalBinary(data)
 			if err != nil {
 				t.Fatalf("UnmarshalBinary failed: %v", err)
 			}
-			
+
 			// Verify restored encoder also has zero width
 			if ce2.values.Width() != 0 {
 				t.Errorf("After unmarshal: Expected width 0, got %d", ce2.values.Width())
