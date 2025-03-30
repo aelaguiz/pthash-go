@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"math/bits"
 
@@ -83,6 +84,12 @@ func optimalParameterKiely(values []uint64) uint8 {
 
 // Encode encodes the values using Rice coding.
 func (rs *RiceSequence) Encode(values []uint64) error {
+	log.Printf("[DEBUG RiceSeq.Encode] ENTER: receiver rs is nil=%t", rs == nil)
+	if rs == nil {
+		log.Printf("[ERROR RiceSeq.Encode] Called on nil receiver!")
+		return fmt.Errorf("RiceSequence.Encode called on nil receiver") // Return error early
+	}
+
 	n := uint64(len(values))
 	l := optimalParameterKiely(values)
 	rs.optimalParamL = l
@@ -131,6 +138,7 @@ func (rs *RiceSequence) Encode(values []uint64) error {
 	// *** CRITICAL: Build D1Array on the *final* highBits BitVector ***
 	rs.highBitsD1 = NewD1Array(rs.highBits) // Use the built BitVector
 
+	log.Printf("[DEBUG RiceSeq.Encode] EXIT OK (L=%d)", rs.optimalParamL)
 	return nil
 }
 
@@ -266,8 +274,27 @@ type RiceEncoder struct {
 	values RiceSequence
 }
 
-func (e *RiceEncoder) Name() string                      { return "R" }
-func (e *RiceEncoder) Encode(pilots []uint64) error      { return e.values.Encode(pilots) }
+func (e *RiceEncoder) Name() string { return "R" }
+func (e *RiceEncoder) Encode(pilots []uint64) error {
+	log.Printf("[DEBUG RiceEnc.Encode] ENTER: receiver e is nil=%t", e == nil)
+	if e == nil {
+		log.Printf("[ERROR RiceEnc.Encode] Called on nil receiver!")
+		// The panic will likely happen on the next line accessing e.values,
+		// but we log the condition first.
+		// We could explicitly return an error here too:
+		// return fmt.Errorf("RiceEncoder.Encode called on nil receiver")
+	}
+	log.Printf("[DEBUG RiceEnc.Encode] Initial state: e.values.lowBits=%p, e.values.highBits=%p, e.values.highBitsD1=%p", 
+		e.values.lowBits, e.values.highBits, e.values.highBitsD1)
+
+	err := e.values.Encode(pilots) // Call Encode on the embedded RiceSequence
+	if err != nil {
+		log.Printf("[ERROR RiceEnc.Encode] e.values.Encode failed: %v", err)
+		return err
+	}
+	log.Printf("[DEBUG RiceEnc.Encode] EXIT OK (L=%d)", e.values.optimalParamL)
+	return nil
+}
 func (e *RiceEncoder) Access(i uint64) uint64            { return e.values.Access(i) }
 func (e *RiceEncoder) NumBits() uint64                   { return e.values.NumBits() }
 func (e *RiceEncoder) Size() uint64                      { return e.values.Size() }

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"reflect"
 	"time"
@@ -75,6 +76,7 @@ func (f *SinglePHF[K, H, B, E]) Build(
 ) (time.Duration, error) {
 
 	start := time.Now()
+	log.Printf("[DEBUG SPHF.Build] ENTER: f=%p, f.pilots type=%T, f.pilots is nil=%t", f, f.pilots, reflect.ValueOf(f.pilots).IsNil()) // Log entry state
 
 	// Check for consistency between PHF type and build config
 	if f.isMinimal != config.Minimal {
@@ -102,13 +104,25 @@ func (f *SinglePHF[K, H, B, E]) Build(
 
 	// --- Encode Pilots ---
 	pilotsData := b.Pilots() // Get slice []uint64
+	log.Printf("[DEBUG SPHF.Build] Before 'var encoder E': f.pilots type=%T, f.pilots is nil=%t", f.pilots, reflect.ValueOf(f.pilots).IsNil())
+
 	// Need to create a new instance of the encoder E to call Encode on.
 	// Assuming E has a zero value that's usable or a New() function.
 	var encoder E // Create a new zero-value encoder instance
+	log.Printf("[DEBUG SPHF.Build] After 'var encoder E': encoder type=%T, encoder is nil=%t", encoder, reflect.ValueOf(encoder).IsNil())
+
 	// If E requires specific initialization, this needs adjustment.
 	f.pilots = encoder
+	log.Printf("[DEBUG SPHF.Build] After 'f.pilots = encoder': f.pilots type=%T, f.pilots is nil=%t", f.pilots, reflect.ValueOf(f.pilots).IsNil())
 
+	// --- Call to Encode ---
+	log.Printf("[DEBUG SPHF.Build] Calling f.pilots.Encode(): f.pilots is nil=%t", reflect.ValueOf(f.pilots).IsNil())
 	err := f.pilots.Encode(pilotsData) // Encode into the PHF's encoder instance
+	if err != nil {
+		log.Printf("[ERROR SPHF.Build] f.pilots.Encode failed: %v", err)
+		return 0, fmt.Errorf("failed to encode pilots: %w", err)
+	}
+	log.Printf("[DEBUG SPHF.Build] f.pilots.Encode returned successfully.")
 	if err != nil {
 		return 0, fmt.Errorf("failed to encode pilots: %w", err)
 	}
@@ -128,6 +142,7 @@ func (f *SinglePHF[K, H, B, E]) Build(
 		f.freeSlots = nil // Ensure it's nil otherwise
 	}
 
+	log.Printf("[DEBUG SPHF.Build] EXIT OK")
 	elapsed := time.Since(start)
 	return elapsed, nil
 }
