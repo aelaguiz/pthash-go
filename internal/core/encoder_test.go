@@ -856,8 +856,8 @@ func TestEliasFanoEncodeInternalState(t *testing.T) {
 
 			// Also check NumBits calculation consistency
 			numBits := ef.NumBits()
-			if tt.wantN == 0 && numBits != 8*8+8*8+8 { // Only metadata expected if N=0
-				t.Errorf("NumBits for N=0: got %d, want %d", numBits, 8*8+8*8+8)
+			if tt.wantN == 0 && numBits != 328 { // EF metadata (136) + D1Array metadata (192)
+				t.Errorf("NumBits for N=0: got %d, want %d", numBits, 328)
 			}
 			if tt.wantN > 0 && numBits < 192 { // Should be larger than just metadata
 				t.Errorf("NumBits seems too small for N=%d: got %d", tt.wantN, numBits)
