@@ -262,11 +262,14 @@ func searchParallelXOR(
 	tableSize uint64,
 ) error {
 	numThreads := config.NumThreads
+	
+	log.Printf("RACE-DEBUG: Starting searchParallelXOR with %d threads", numThreads)
 
 	// Need concurrent-safe access to taken bits and pilots buffer.
 	// Using Mutex for simplicity, although atomics or sharding might be faster.
 	var takenMu sync.Mutex
 	var pilotsMu sync.Mutex // Assuming PilotsBuffer is not inherently safe
+	var loggerMu sync.Mutex // Add mutex for logger to fix race
 
 	// Wrap pilots buffer
 	pilotsEmplaceBack := func(bucketID core.BucketIDType, pilot uint64) {
@@ -408,7 +411,11 @@ func searchParallelXOR(
 
 					// Store pilot (also needs safety if buffer isn't safe)
 					pilotsEmplaceBack(bucketID, currentPilot)
+					
+					// RACE-DEBUG: Lock logger during update
+					loggerMu.Lock()
 					logger.Update(localBucketIdx, bucketSize) // Log progress
+					loggerMu.Unlock()
 
 					break // Success for this bucket, exit outer retry loop
 				} else {
@@ -516,7 +523,9 @@ func searchSequentialAdd(
 				}
 
 				// Check collision with taken bits
-				if taken.Get(p) {
+				// RACE-DEBUG: This Get() call is not protected by a mutex!
+				isTaken := taken.Get(p)
+				if isTaken {
 					if pilot > 0 && pilot%1000000 == 0 {
 						log.Printf("  Collision at position %d for payload %d", p, pld)
 					}

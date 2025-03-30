@@ -198,6 +198,7 @@ func (b *BitVectorBuilder) grow(needed uint64) {
 
 // Get returns the bit value at the given position.
 // This is used during search to check for collisions.
+// NOTE: Not safe for concurrent use without external synchronization!
 func (b *BitVectorBuilder) Get(pos uint64) bool {
 	if pos >= b.size {
 		// Reading beyond current size conceptually returns 0/false
