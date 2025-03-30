@@ -292,3 +292,82 @@ func TestBitVectorSerialization(t *testing.T) {
 	}
 
 }
+
+// TestBitVectorBuilderPushBackCrossBoundary verifies PushBack across word boundaries,
+// specifically testing the clearing of bits when pushing false.
+func TestBitVectorBuilderPushBackCrossBoundary(t *testing.T) {
+	b := NewBitVectorBuilder(60) // Start with capacity slightly less than 64
+
+	// 1. Fill the first ~60 bits with alternating 1s
+	// This ensures the word isn't all zeros initially.
+	for i := uint64(0); i < 60; i++ {
+		b.PushBack(i%2 != 0) // Push 0, 1, 0, 1, ...
+	}
+	if b.Size() != 60 {
+		t.Fatalf("Setup failed: size should be 60, got %d", b.Size())
+	}
+	t.Logf("After initial fill (60 bits): size=%d, words[0]=0x%x", b.Size(), b.words[0])
+
+	// 2. Push 'false' bits to fill up to bit 63
+	// We expect bits 60, 61, 62, 63 to become 0.
+	t.Logf("Pushing 4 'false' bits (60 to 63)...")
+	for i := 0; i < 4; i++ {
+		b.PushBack(false)
+	}
+	if b.Size() != 64 {
+		t.Fatalf("After pushing false: size should be 64, got %d", b.Size())
+	}
+	// Verify bits 60-63 are now 0 in word 0
+	mask60_63 := uint64(0xF) << 60
+	if (b.words[0] & mask60_63) != 0 {
+		t.Errorf("Bits 60-63 should be 0 after pushing false, word[0]=0x%x", b.words[0])
+	}
+	t.Logf("After pushing 4 false: size=%d, words[0]=0x%x", b.Size(), b.words[0])
+
+	// 3. Push 'true' bits across the boundary (bits 64, 65)
+	t.Logf("Pushing 2 'true' bits (64, 65)...")
+	b.PushBack(true) // Should go into words[1], bit 0
+	b.PushBack(true) // Should go into words[1], bit 1
+	if b.Size() != 66 {
+		t.Fatalf("After pushing true: size should be 66, got %d", b.Size())
+	}
+	if len(b.words) != 2 {
+		t.Fatalf("Should have 2 words, got %d", len(b.words))
+	}
+	// Expected: words[1] should have bits 0 and 1 set -> 0x...0011 = 3
+	if b.words[1] != 3 {
+		t.Errorf("Word 1 has incorrect value after pushing true: got 0x%x, want 0x3", b.words[1])
+	}
+	t.Logf("After pushing 2 true: size=%d, words[0]=0x%x, words[1]=0x%x", b.Size(), b.words[0], b.words[1])
+
+	// 4. Push 'false' bits into the second word (bits 66, 67)
+	t.Logf("Pushing 2 'false' bits (66, 67)...")
+	b.PushBack(false) // Should clear bit 2 in words[1]
+	b.PushBack(false) // Should clear bit 3 in words[1]
+	if b.Size() != 68 {
+		t.Fatalf("After pushing false again: size should be 68, got %d", b.Size())
+	}
+	// Expected: words[1] should *still* be 3 (bits 0, 1 set), assuming bits 2,3 were 0.
+	// If the original PushBack(false) wasn't clearing, this wouldn't change anything.
+	// The crucial test was step 2. Let's re-verify word 1 just in case.
+	if b.words[1] != 3 {
+		t.Errorf("Word 1 has incorrect value after pushing false again: got 0x%x, want 0x3", b.words[1])
+	}
+	t.Logf("After pushing 2 false: size=%d, words[0]=0x%x, words[1]=0x%x", b.Size(), b.words[0], b.words[1])
+
+	// 5. Build and verify final BitVector
+	bv := b.Build()
+	if bv.Size() != 68 {
+		t.Fatalf("Final BV size mismatch: got %d, want 68", bv.Size())
+	}
+	// Check some boundary bits in the final vector
+	if bv.Get(60) || bv.Get(61) || bv.Get(62) || bv.Get(63) {
+		t.Errorf("Bits 60-63 should be false in final BV")
+	}
+	if !bv.Get(64) || !bv.Get(65) {
+		t.Errorf("Bits 64, 65 should be true in final BV")
+	}
+	if bv.Get(66) || bv.Get(67) {
+		t.Errorf("Bits 66, 67 should be false in final BV")
+	}
+}
