@@ -170,7 +170,7 @@ func main() {
 	for i, key := range keys {
 		results[i] = phf.Lookup(key)
 		// Optional: Print some lookups
-		if i < 5 || i >= numKeys-5 {
+		if i < 5 || uint64(i) >= numKeys-5 {
 			fmt.Printf("  Lookup(%d) -> %d\n", key, results[i])
 		}
 		if i == 5 {
