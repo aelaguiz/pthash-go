@@ -491,8 +491,26 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 	}
 	log.Printf("[DEBUG EF.Encode] Finished building lowerBits and upperBits vectors.")
 
+	// Log builder state before Build()
+	log.Printf("[DEBUG EF.Encode] BEFORE ubBuilder.Build(): ubBuilder.size=%d, ubBuilder.capacity=%d, len(ubBuilder.words)=%d",
+		ubBuilder.size, ubBuilder.capacity, len(ubBuilder.words))
+	if len(ubBuilder.words) > 0 {
+		log.Printf("[DEBUG EF.Encode]   Last word (before build): 0x%016x", ubBuilder.words[len(ubBuilder.words)-1])
+	}
+
 	ef.lowerBits = lbBuilder.Build()
 	upperBitsBV := ubBuilder.Build() // Build the final bit vector
+
+	// Log BitVector state after Build()
+	log.Printf("[DEBUG EF.Encode] AFTER ubBuilder.Build(): upperBitsBV.size=%d, upperBitsBV.numWords=%d",
+		upperBitsBV.Size(), upperBitsBV.NumWords())
+	if upperBitsBV.NumWords() > 0 {
+		log.Printf("[DEBUG EF.Encode]   First word (after build): 0x%016x", upperBitsBV.Words()[0])
+		if upperBitsBV.NumWords() > 1 {
+			log.Printf("[DEBUG EF.Encode]   Last word (after build): 0x%016x", upperBitsBV.Words()[upperBitsBV.NumWords()-1])
+		}
+	}
+
 	log.Printf("[DEBUG EF.Encode] upperBitsBV size = %d, numWords = %d", upperBitsBV.Size(), upperBitsBV.NumWords())
 	ef.upperBitsSelect = NewD1Array(upperBitsBV) // Build D1Array on the BV
 	log.Printf("[DEBUG EF.Encode] D1Array built. numSetBits=%d", ef.upperBitsSelect.numSetBits)
