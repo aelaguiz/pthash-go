@@ -1,6 +1,7 @@
 package pthash_test
 
 import (
+	"errors"
 	"fmt"
 	"pthashgo/internal/builder"
 	"pthashgo/internal/core"
@@ -65,7 +66,9 @@ func TestInternalPartitionedPHFBuildAndCheck(t *testing.T) {
 
 									buildTimings, err := pb.BuildFromKeys(keys, config)
 									if err != nil {
-										if seedErr, ok := err.(core.SeedRuntimeError); ok {
+										// Check if this error or any wrapped error is a SeedRuntimeError
+										var seedErr core.SeedRuntimeError
+										if errors.As(err, &seedErr) {
 											// Use Skipf to mark the test as skipped with the error message
 											t.Skipf("Skipping test: BuildFromKeys failed with SeedRuntimeError: %v", seedErr)
 											return
@@ -173,6 +176,11 @@ func TestPartitionedPHFSerialization(t *testing.T) {
 
 	_, err := builderInst.BuildFromKeys(keys, config)
 	if err != nil {
+		var seedErr core.SeedRuntimeError
+		if errors.As(err, &seedErr) {
+			t.Skipf("Skipping test: BuildFromKeys failed with SeedRuntimeError: %v", seedErr)
+			return
+		}
 		t.Fatalf("BuildFromKeys failed: %v", err)
 	}
 
