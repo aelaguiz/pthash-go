@@ -237,6 +237,23 @@ func (f *SinglePHF[K, H, B, E]) NumBits() uint64 {
 	return f.NumBitsForPilots() + f.NumBitsForMapper()
 }
 
+// --- Helper methods for logging ---
+
+// BucketerForLog returns the bucketer for diagnostic logging.
+func (f *SinglePHF[K, H, B, E]) BucketerForLog() any {
+	return f.bucketer
+}
+
+// PilotsForLog returns the pilots encoder for diagnostic logging.
+func (f *SinglePHF[K, H, B, E]) PilotsForLog() core.Encoder {
+	return f.pilots
+}
+
+// FreeSlotsForLog returns the free slots structure for diagnostic logging.
+func (f *SinglePHF[K, H, B, E]) FreeSlotsForLog() any {
+	return f.freeSlots
+}
+
 // --- Serialization (Refined) ---
 
 const singlePHFMagic = "SPHF" // Magic identifier for file type

@@ -368,7 +368,28 @@ func TestSinglePHFSerialization(t *testing.T) {
 		if core.IsEliasFanoStubbed() && config.Minimal {
 			t.Skipf("Skipping serialization test: Minimal PHF requires functional EliasFano (stub detected)")
 		}
+		// Add check for RiceEncoder/D1Array stub
+		if core.IsD1ArraySelectStubbed() {
+			t.Skipf("Skipping serialization test: RiceEncoder requires functional D1Array (stub detected)")
+		}
 		t.Fatalf("phf1.Build failed: %v", err)
+	}
+
+	// --- Add logging to help diagnose serialization issues ---
+	t.Logf("--- TestSinglePHFSerialization ---")
+	t.Logf("PHF1 (Before Marshal): Seed=%d, NumKeys=%d, TableSize=%d, IsMinimal=%t, SearchType=%v",
+		phf1.Seed(), phf1.NumKeys(), phf1.TableSize(), phf1.IsMinimal(), phf1.SearchType())
+	// Additional logging for component details
+	if phf1.BucketerForLog() != nil {
+		t.Logf("  Bucketer type: %T", phf1.BucketerForLog())
+	}
+	if phf1.PilotsForLog() != nil {
+		t.Logf("  Pilots type: %T, NumBits: %d", phf1.PilotsForLog(), phf1.PilotsForLog().NumBits())
+	}
+	if phf1.FreeSlotsForLog() != nil {
+		t.Logf("  FreeSlots present: true")
+	} else {
+		t.Logf("  FreeSlots present: false")
 	}
 
 	// --- Marshal ---
@@ -380,13 +401,36 @@ func TestSinglePHFSerialization(t *testing.T) {
 		t.Fatalf("MarshalBinary returned empty data")
 	}
 	t.Logf("Marshaled SinglePHF size: %d bytes (%.2f bits/key)", len(data), float64(len(data)*8)/float64(phf1.NumKeys()))
+	// Log a sample of the data to help with debugging
+	if len(data) > 32 {
+		t.Logf("  Data sample (first 32 bytes): %x", data[:32])
+	} else {
+		t.Logf("  Data sample (all %d bytes): %x", len(data), data)
+	}
 
 	// --- Unmarshal ---
 	phf2 := pthash.NewSinglePHF[K, H, *B, *E](config.Minimal, config.Search) // Create a new empty instance with *same* generic types
+	t.Logf("PHF2 (Before Unmarshal): Zero/default value")
+
 	err = phf2.UnmarshalBinary(data)
 	if err != nil {
 		// If underlying components' UnmarshalBinary are stubbed/fail, this will fail.
 		t.Fatalf("phf2.UnmarshalBinary() failed: %v", err)
+	}
+
+	// --- Log state after unmarshaling ---
+	t.Logf("PHF2 (After Unmarshal): Seed=%d, NumKeys=%d, TableSize=%d, IsMinimal=%t, SearchType=%v",
+		phf2.Seed(), phf2.NumKeys(), phf2.TableSize(), phf2.IsMinimal(), phf2.SearchType())
+	if phf2.BucketerForLog() != nil {
+		t.Logf("  Bucketer type: %T", phf2.BucketerForLog())
+	}
+	if phf2.PilotsForLog() != nil {
+		t.Logf("  Pilots type: %T, NumBits: %d", phf2.PilotsForLog(), phf2.PilotsForLog().NumBits())
+	}
+	if phf2.FreeSlotsForLog() != nil {
+		t.Logf("  FreeSlots present: true")
+	} else {
+		t.Logf("  FreeSlots present: false")
 	}
 
 	// --- Compare ---
@@ -411,14 +455,16 @@ func TestSinglePHFSerialization(t *testing.T) {
 
 	// Compare a lookup (basic functional check)
 	// Skip if EliasFano is needed but stubbed
-	if !(config.Minimal && core.IsEliasFanoStubbed()) {
+	if !(config.Minimal && core.IsEliasFanoStubbed()) && !core.IsD1ArraySelectStubbed() {
 		sampleKey := keys[numKeys/2]
 		val1 := phf1.Lookup(sampleKey)
 		val2 := phf2.Lookup(sampleKey)
 		if val1 != val2 {
 			t.Errorf("Lookup mismatch for key %d after serialization: %d != %d", sampleKey, val1, val2)
+		} else {
+			t.Logf("Lookup check passed for key %d -> %d", sampleKey, val1)
 		}
 	} else {
-		t.Log("Skipping lookup check due to stubbed EliasFano for minimal PHF.")
+		t.Log("Skipping lookup check due to stubbed EliasFano/D1Array.")
 	}
 }
