@@ -345,15 +345,17 @@ func (f *DensePartitionedPHF[K, H, B, E]) MarshalBinary() ([]byte, error) {
 	return buf, nil
 }
 
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
+// UnmarshalBinary
+// File: pkg/pthash/dense_partitioned.go
+
 func (f *DensePartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
-	headerSize := 8 + 40
+	headerSize := 4 + 1 + 1 + 1 + 1 + 8 + 8 + 8 + 8 + 8 // Adjusted size for core params
 	if len(data) < headerSize {
 		return io.ErrUnexpectedEOF
 	}
 	offset := 0
 
-	// 1. Read Header
+	// 1. Read Header (same as before)
 	if string(data[offset:offset+4]) != densePartitionedPHFMagic {
 		return fmt.Errorf("invalid magic")
 	}
@@ -369,7 +371,7 @@ func (f *DensePartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	f.searchType = core.SearchType((flags >> 1) & 3)
 	offset += 2 // Reserved
 
-	// 2. Read Core
+	// 2. Read Core Params (same as before)
 	f.seed = binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 	f.numKeys = binary.LittleEndian.Uint64(data[offset:])
@@ -381,53 +383,92 @@ func (f *DensePartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	f.numBucketsPerPartition = binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 
-	// 3. Read Components
-	var err error
-	readComponent := func(target interface{}) error {
+	// 3. Read Components - Allocate Pointers *before* calling TryUnmarshal
+
+	// Helper to read length-prefixed data and unmarshal
+	readComponent := func(target interface{}, description string) (int, error) {
 		if offset+8 > len(data) {
-			return io.ErrUnexpectedEOF
+			return offset, fmt.Errorf("%s length: %w", description, io.ErrUnexpectedEOF)
 		}
 		compLen := binary.LittleEndian.Uint64(data[offset:])
 		offset += 8
 		endOffset := offset + int(compLen)
 		if endOffset > len(data) {
-			return io.ErrUnexpectedEOF
+			return offset, fmt.Errorf("%s data bounds: %w", description, io.ErrUnexpectedEOF)
 		}
+		// Pass the allocated pointer target directly
 		err := serial.TryUnmarshal(target, data[offset:endOffset])
-		offset = endOffset
+		if err != nil {
+			return offset, fmt.Errorf("%s: %w", description, err)
+		}
+		return endOffset, nil // Return new offset
+	}
+
+	var err error
+
+	// Allocate and Read Partitioner
+	f.partitioner = &core.RangeBucketer{} // Allocate
+	offset, err = readComponent(f.partitioner, "unmarshal partitioner")
+	if err != nil {
 		return err
 	}
 
-	// Need to initialize pointer fields before unmarshaling into them
-	f.partitioner = &core.RangeBucketer{}
-	if err = readComponent(f.partitioner); err != nil {
-		return fmt.Errorf("unmarshal partitioner: %w", err)
+	// Allocate and Read SubBucketer (if B is pointer type)
+	var zeroB B
+	typeB := reflect.TypeOf(zeroB)
+	if typeB != nil && typeB.Kind() == reflect.Ptr {
+		elemType := typeB.Elem()
+		newInstance := reflect.New(elemType)
+		if !newInstance.CanInterface() {
+			return fmt.Errorf("cannot interface allocated subBucketer pointer for type %v", elemType)
+		}
+		f.subBucketer = newInstance.Interface().(B) // Assign allocated pointer
+	} else {
+		f.subBucketer = zeroB // Assign zero value for non-pointer types
 	}
-	// Cannot directly unmarshal into generic B/E/DiffEncoder - assume zero value target is okay
-	if err = readComponent(&f.subBucketer); err != nil {
-		return fmt.Errorf("unmarshal subBucketer: %w", err)
-	}
-	if err = readComponent(&f.pilots); err != nil {
-		return fmt.Errorf("unmarshal pilots: %w", err)
-	}
-	f.offsets = &core.DiffEncoder[*core.CompactEncoder]{} // Initialize pointer
-	if err = readComponent(f.offsets); err != nil {
-		return fmt.Errorf("unmarshal offsets: %w", err)
+	offset, err = readComponent(f.subBucketer, "unmarshal subBucketer") // Pass pointer/value
+	if err != nil {
+		return err
 	}
 
-	// Read free slots length separately to know if we need to allocate
+	// Allocate and Read Pilots (if E is pointer type)
+	var zeroE E
+	typeE := reflect.TypeOf(zeroE)
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		elemType := typeE.Elem()
+		newInstance := reflect.New(elemType)
+		if !newInstance.CanInterface() {
+			return fmt.Errorf("cannot interface allocated pilots pointer for type %v", elemType)
+		}
+		f.pilots = newInstance.Interface().(E)
+	} else {
+		f.pilots = zeroE
+	}
+	offset, err = readComponent(f.pilots, "unmarshal pilots") // Pass pointer/value
+	if err != nil {
+		return err
+	}
+
+	// Allocate and Read Offsets
+	f.offsets = &core.DiffEncoder[*core.CompactEncoder]{} // Allocate specific type
+	offset, err = readComponent(f.offsets, "unmarshal offsets")
+	if err != nil {
+		return err
+	}
+
+	// Read Free Slots (allocate only if needed)
 	if offset+8 > len(data) {
-		return io.ErrUnexpectedEOF
+		return fmt.Errorf("freeSlots length: %w", io.ErrUnexpectedEOF)
 	}
 	freeSlotsLen := binary.LittleEndian.Uint64(data[offset:])
 	offset += 8
 	endOffset := offset + int(freeSlotsLen)
 	if endOffset > len(data) {
-		return io.ErrUnexpectedEOF
+		return fmt.Errorf("freeSlots data bounds: %w", io.ErrUnexpectedEOF)
 	}
 	if freeSlotsLen > 0 {
-		f.freeSlots = core.NewEliasFano()
-		err = serial.TryUnmarshal(f.freeSlots, data[offset:endOffset])
+		f.freeSlots = core.NewEliasFano()                              // Allocate
+		err = serial.TryUnmarshal(f.freeSlots, data[offset:endOffset]) // Pass pointer
 		if err != nil {
 			return fmt.Errorf("unmarshal freeSlots: %w", err)
 		}

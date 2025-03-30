@@ -77,7 +77,7 @@ func runPartitionBuild(t *testing.T, config core.BuildConfig, keys []uint64) (*I
 		for _, key := range keys {
 			hash := builder.hasher.Hash(key, builder.seed)
 			partitionIdx := builder.partitioner.Bucket(hash.Mix())
-			if partitionIdx >= builder.numPartitions {
+			if uint64(partitionIdx) >= builder.numPartitions {
 				return builder, nil, fmt.Errorf("partition index %d out of bounds (%d)", partitionIdx, builder.numPartitions)
 			}
 			partitionBuffers[partitionIdx] = append(partitionBuffers[partitionIdx], hash)
@@ -353,4 +353,83 @@ func TestPartitioningAccessors(t *testing.T) {
 		t.Errorf("Partitioner().NumBuckets() mismatch: got %d, want %d", p.NumBuckets(), expectedPartitions)
 	}
 	// Cannot easily check TableSize without running sub-builds fully
+}
+
+func TestPartitioningDistribution(t *testing.T) {
+	numKeys := uint64(100000)
+	avgPartitionSize := uint64(10000)
+	numPartitions := core.ComputeNumPartitions(numKeys, avgPartitionSize)
+	if numPartitions == 0 {
+		numPartitions = 1
+	}
+	seed := uint64(12345)
+	keys := util.DistinctUints64(numKeys, seed)
+
+	config := core.DefaultBuildConfig()
+	config.NumThreads = runtime.NumCPU()
+	config.AvgPartitionSize = avgPartitionSize // Needed for ComputeNumPartitions logic if used inside
+	config.Verbose = false
+
+	// --- Setup Builder just for partitioning ---
+	type K = uint64
+	type H = core.XXHash128Hasher[K]
+	type B = *core.SkewBucketer // Type B doesn't really matter here
+	hasher := core.NewXXHash128Hasher[K]()
+	builder := NewInternalMemoryBuilderPartitionedPHF[K, H, B](hasher)
+	builder.numKeys = numKeys
+	builder.seed = seed
+	builder.numPartitions = numPartitions
+	builder.config = config
+
+	err := builder.partitioner.Init(numPartitions, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("partitioner init failed: %v", err)
+	}
+
+	// --- Partition ---
+	partitionBuffers := make([][]core.Hash128, builder.numPartitions)
+	for i := range partitionBuffers {
+		allocHint := uint64(float64(avgPartitionSize) * 1.1)
+		if allocHint == 0 {
+			allocHint = 10
+		}
+		partitionBuffers[i] = make([]core.Hash128, 0, allocHint)
+	}
+
+	if config.NumThreads > 1 && numKeys >= uint64(config.NumThreads)*100 {
+		builder.parallelHashAndPartition(keys, partitionBuffers)
+	} else {
+		for _, key := range keys {
+			hash := builder.hasher.Hash(key, builder.seed)
+			partitionIdx := builder.partitioner.Bucket(hash.Mix())
+			if uint64(partitionIdx) >= builder.numPartitions {
+				t.Fatalf("partition index %d out of bounds (%d)", partitionIdx, builder.numPartitions)
+			}
+			partitionBuffers[partitionIdx] = append(partitionBuffers[partitionIdx], hash)
+		}
+	}
+
+	// --- Verification ---
+	totalKeysInBuffers := uint64(0)
+	minSize, maxSize := uint64(numKeys), uint64(0)
+	for i, buf := range partitionBuffers {
+		size := uint64(len(buf))
+		totalKeysInBuffers += size
+		if size < minSize && size > 0 {
+			minSize = size
+		} // Ignore empty partitions for min
+		if size > maxSize {
+			maxSize = size
+		}
+		if size == 0 {
+			t.Logf("Partition %d is empty", i)
+		}
+	}
+
+	if totalKeysInBuffers != numKeys {
+		t.Errorf("Total keys in partitions (%d) does not match input numKeys (%d)", totalKeysInBuffers, numKeys)
+	}
+	t.Logf("Partitioning successful: %d partitions, total keys %d", builder.numPartitions, totalKeysInBuffers)
+	t.Logf("Partition size range: [%d, %d], Avg expected: %d", minSize, maxSize, avgPartitionSize)
+	// Optional: Add check for standard deviation if needed, but range is usually sufficient.
 }

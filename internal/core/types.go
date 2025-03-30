@@ -29,7 +29,7 @@ func (h Hash128) Mix() uint64 {
 // BucketIDType defines the type for bucket identifiers.
 // Default to uint32 to match C++ default.
 // Use build tags or config to switch to uint64 if needed.
-type BucketIDType uint32
+type BucketIDType uint64
 
 const MaxBucketID = ^BucketIDType(0)
 

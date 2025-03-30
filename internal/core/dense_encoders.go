@@ -76,8 +76,8 @@ func (dm *DenseMono[E]) EncodeDense(iterator PilotIterator, numPartitions uint64
 	if shouldAllocate {
 		// E is a pointer type (e.g., *RiceEncoder), and dm.Encoder is nil.
 		// Allocate the underlying type.
-		elemType := typeE.Elem()               // e.g., RiceEncoder
-		newInstance := reflect.New(elemType)   // Create *RiceEncoder as reflect.Value
+		elemType := typeE.Elem()             // e.g., RiceEncoder
+		newInstance := reflect.New(elemType) // Create *RiceEncoder as reflect.Value
 		// Assign the created pointer (*RiceEncoder) to dm.Encoder
 		if newInstance.CanInterface() {
 			dm.Encoder = newInstance.Interface().(E)
@@ -145,9 +145,9 @@ func (dm *DenseMono[E]) UnmarshalBinary(data []byte) error {
 			dm.Encoder = newInstance.Interface().(E)
 		}
 	}
-	
+
 	// Now unmarshal into the address of dm.Encoder
-	err := serial.TryUnmarshal(&dm.Encoder, data[offset:offset+int(encLen)])
+	err := serial.TryUnmarshal(dm.Encoder, data[offset:offset+int(encLen)])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal underlying encoder: %w", err)
 	}
@@ -172,13 +172,13 @@ func (di *DenseInterleaved[E]) Size() uint64 {
 	if len(di.Encoders) == 0 {
 		return 0
 	}
-	
+
 	// Check if E is a pointer type and the first element is nil
 	typeE := reflect.TypeOf(di.Encoders[0])
 	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(di.Encoders[0]).IsNil() {
 		return 0
 	}
-	
+
 	return di.Encoders[0].Size() * uint64(len(di.Encoders)) // Assumes all sub-encoders have same Size
 }
 
@@ -219,7 +219,7 @@ func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions
 				idx := b*numPartitions + p
 				pilotsForBucket[p] = allPilots[idx]
 			}
-			
+
 			// Initialize the encoder based on whether E is a pointer type
 			var zeroE E
 			typeE := reflect.TypeOf(zeroE)
@@ -229,7 +229,7 @@ func (di *DenseInterleaved[E]) EncodeDense(iterator PilotIterator, numPartitions
 				newInstance := reflect.New(elemType).Interface().(E)
 				di.Encoders[b] = newInstance
 			}
-			
+
 			// Call Encode on the encoder (value or pointer)
 			err := di.Encoders[b].Encode(pilotsForBucket)
 			if err != nil {
@@ -272,13 +272,13 @@ func (di *DenseInterleaved[E]) AccessDense(partition uint64, bucket uint64) uint
 	if bucket >= uint64(len(di.Encoders)) {
 		panic(fmt.Sprintf("DenseInterleaved.AccessDense: bucket index %d out of bounds (%d)", bucket, len(di.Encoders)))
 	}
-	
+
 	// Check if E is a pointer type and the element is nil
 	typeE := reflect.TypeOf(di.Encoders[bucket])
 	if typeE != nil && typeE.Kind() == reflect.Ptr && reflect.ValueOf(di.Encoders[bucket]).IsNil() {
 		panic(fmt.Sprintf("DenseInterleaved.AccessDense: encoder for bucket %d is nil", bucket))
 	}
-	
+
 	return di.Encoders[bucket].Access(partition)
 }
 func (di *DenseInterleaved[E]) MarshalBinary() ([]byte, error) {
@@ -329,7 +329,7 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 		if uint64(offset)+encLen > uint64(len(data)) {
 			return io.ErrUnexpectedEOF
 		}
-		
+
 		// Handle pointer allocation if E is a pointer type
 		var zeroE E
 		typeE := reflect.TypeOf(zeroE)
@@ -338,9 +338,9 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 			newInstance := reflect.New(elemType)
 			di.Encoders[i] = newInstance.Interface().(E)
 		}
-		
+
 		// Unmarshal into the address of the (potentially newly allocated) element
-		err := serial.TryUnmarshal(&di.Encoders[i], data[offset:offset+int(encLen)])
+		err := serial.TryUnmarshal(di.Encoders[i], data[offset:offset+int(encLen)])
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal encoder %d: %w", i, err)
 		}
@@ -460,7 +460,7 @@ func (de *DiffEncoder[E]) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal underlying encoder: %w", err)
 	}
-	
+
 	// Prepare buffer: Increment + Encoder Data Length + Encoder Data
 	totalSize := 8 + 8 + len(encData)
 	buf := make([]byte, totalSize)
@@ -502,13 +502,13 @@ func (de *DiffEncoder[E]) UnmarshalBinary(data []byte) error {
 			de.Encoder = newInstance.Interface().(E)
 		}
 	}
-	
+
 	// Now unmarshal into the address of Encoder
-	err := serial.TryUnmarshal(&de.Encoder, data[offset:expectedEndOffset])
+	err := serial.TryUnmarshal(de.Encoder, data[offset:expectedEndOffset])
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal underlying encoder: %w", err)
+		return fmt.Errorf("failed to unmarshal underlying encoder (type %T): %w", de.Encoder, err)
 	}
-	
+
 	offset = expectedEndOffset
 	if offset != len(data) {
 		return fmt.Errorf("extra data after DiffEncoder unmarshal")

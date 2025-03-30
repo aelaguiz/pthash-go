@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"math/bits"
+	"pthashgo/internal/serial"
 )
 
 // Bucketer defines the interface for assigning hashes to buckets.
@@ -134,7 +135,7 @@ func (b *SkewBucketer) UnmarshalBinary(data []byte) error {
 	offset += 8
 	b.mNumSparseBuckets[1] = binary.LittleEndian.Uint64(data[offset:]) // High
 	// Basic validation
-	if b.numDenseBuckets+b.numSparseBuckets == 0 && (len(data) != (8+8+16+16)) {
+	if b.numDenseBuckets+b.numSparseBuckets == 0 && (len(data) != (8 + 8 + 16 + 16)) {
 		// Allow 0 buckets, but data should match size
 		return fmt.Errorf("skew bucketer consistency error after unmarshal")
 	}
@@ -212,14 +213,6 @@ type RangeBucketer struct {
 
 // Init initializes the RangeBucketer. Ignores lambda, tableSize, alpha.
 func (b *RangeBucketer) Init(numBuckets uint64, lambda float64, tableSize uint64, alpha float64) error {
-	// RangeBucketer only needs numBuckets
-	if numBuckets > uint64(MaxBucketID) {
-		// Add a check here because the Bucket method now returns BucketIDType
-		// If we allow more partitions than MaxBucketID, the Bucket method's cast
-		// would truncate the partition index, leading to incorrect partitioning.
-		// This check prevents that specific issue.
-		return fmt.Errorf("RangeBucketer: number of partitions (%d) exceeds limit for BucketIDType (%d)", numBuckets, MaxBucketID)
-	}
 	b.numBuckets = numBuckets
 	return nil
 }
@@ -405,13 +398,9 @@ type TableBucketer[Base Bucketer] struct {
 }
 
 // NewTableBucketer creates a new TableBucketer.
-func NewTableBucketer[Base Bucketer](base Bucketer) *TableBucketer[Base] {
-	// Need to handle generics: ensure base is the *correct* type Base.
-	// This might require passing the zero value or using reflection carefully.
-	// Let's assume 'base' passed in is already the correct type B.
-	// It might be better to require base to be passed in Init.
-	var baseInst Base // Create zero value instance
-	return &TableBucketer[Base]{base: baseInst}
+func NewTableBucketer[Base Bucketer](base Base) *TableBucketer[Base] {
+	// Store the provided base instance directly
+	return &TableBucketer[Base]{base: base}
 }
 
 // Init initializes the TableBucketer and computes fulcrums.
@@ -576,11 +565,18 @@ func (tb *TableBucketer[Base]) UnmarshalBinary(data []byte) error {
 	if uint64(offset)+baseLen > uint64(len(data)) {
 		return io.ErrUnexpectedEOF
 	}
-	// Unmarshal into the existing tb.base (must be addressable)
-	err := serial.TryUnmarshal(&tb.base, data[offset:offset+int(baseLen)])
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal base bucketer: %w", err)
+
+	// Unmarshal into the existing tb.base
+	// First check if tb.base is directly unmarshalable
+	if unmarshaler, ok := any(tb.base).(encoding.BinaryUnmarshaler); ok {
+		err := unmarshaler.UnmarshalBinary(data[offset : offset+int(baseLen)])
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal base bucketer directly: %w", err)
+		}
+	} else {
+		return fmt.Errorf("base bucketer type %T does not implement encoding.BinaryUnmarshaler", tb.base)
 	}
+
 	offset += int(baseLen)
 
 	// 3. Read fulcrums

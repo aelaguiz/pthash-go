@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const maxPilotAttempts = 50_000_000 // TEMPORARY DEBUG LIMIT
+const DefaultMaxPilotAttempts uint64 = 50_000_000 // Default limit for pilot search attempts
 
 // Search orchestrates the pilot search based on config.
 func Search[B core.Bucketer]( // Pass Bucketer type for logger
@@ -59,7 +59,7 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 		} else {
 			log.Printf("Using SEQUENTIAL search (XOR)")
 			err = searchSequentialXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
-				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize64, tableSize)
+				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize64, tableSize, DefaultMaxPilotAttempts)
 		}
 	case core.SearchTypeAdd:
 		if isParallel {
@@ -69,7 +69,7 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 		} else {
 			log.Printf("Using SEQUENTIAL search (ADD)")
 			err = searchSequentialAdd(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
-				bucketsIt, taken, pilots, logger, mTableSize32, tableSize) // Pass m32
+				bucketsIt, taken, pilots, logger, mTableSize32, tableSize, DefaultMaxPilotAttempts) // Pass m32
 		}
 	default:
 		return fmt.Errorf("unknown search type: %v", config.Search)
@@ -88,7 +88,13 @@ func searchSequentialXOR(
 	hashedPilotsCache []uint64,
 	mTableSize core.M64,
 	tableSize uint64,
+	maxAttempts ...uint64, // Optional parameter to override default max attempts
 ) error {
+	maxPilotAttempts := DefaultMaxPilotAttempts
+	if len(maxAttempts) > 0 {
+		maxPilotAttempts = maxAttempts[0]
+	}
+
 	positions := make([]uint64, 0, core.MaxBucketSize) // Preallocate for max possible size
 	processedBuckets := uint64(0)
 	searchStartTime := time.Now()
@@ -262,7 +268,7 @@ func searchParallelXOR(
 	tableSize uint64,
 ) error {
 	numThreads := config.NumThreads
-	
+
 	log.Printf("RACE-DEBUG: Starting searchParallelXOR with %d threads", numThreads)
 
 	// Need concurrent-safe access to taken bits and pilots buffer.
@@ -411,7 +417,7 @@ func searchParallelXOR(
 
 					// Store pilot (also needs safety if buffer isn't safe)
 					pilotsEmplaceBack(bucketID, currentPilot)
-					
+
 					// RACE-DEBUG: Lock logger during update
 					loggerMu.Lock()
 					logger.Update(localBucketIdx, bucketSize) // Log progress
@@ -464,7 +470,13 @@ func searchSequentialAdd(
 	// Needs m64 and tableSize for fastmod32
 	m64 core.M32, // Precomputed M for fastmod32
 	tableSize uint64, // Needed for d parameter
+	maxAttempts ...uint64, // Optional parameter to override default max attempts
 ) error {
+	maxPilotAttempts := DefaultMaxPilotAttempts
+	if len(maxAttempts) > 0 {
+		maxPilotAttempts = maxAttempts[0]
+	}
+
 	positions := make([]uint64, 0, core.MaxBucketSize)
 	d32 := uint32(tableSize) // Precompute for modulo
 
@@ -569,6 +581,7 @@ func searchSequentialAdd(
 		} // End pilot search loop
 
 		if !foundPilot {
+			// Check if pilot limit was reached (should be unreachable with above condition)
 			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d (ADD) after %d attempts", bucketID, maxPilotAttempts)}
 		}
 		processedBuckets++

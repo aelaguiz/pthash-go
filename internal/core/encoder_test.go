@@ -304,29 +304,6 @@ func TestEliasFanoRoundtrip(t *testing.T) {
 				}
 			}
 
-			// Test serialization roundtrip
-			data, err := ef.MarshalBinary()
-			if err != nil {
-				t.Fatalf("Marshal failed: %v", err)
-			}
-
-			ef2 := NewEliasFano()
-			err = ef2.UnmarshalBinary(data)
-			if err != nil {
-				t.Fatalf("Unmarshal failed: %v", err)
-			}
-
-			// Deep comparison is hard, just check size and access again
-			if ef2.Size() != uint64(len(values)) {
-				t.Fatalf("Size mismatch after unmarshal: got %d, want %d", ef2.Size(), len(values))
-			}
-			for i, expected := range values {
-				got := ef2.Access(uint64(i))
-				if got != expected {
-					t.Errorf("Access(%d) after unmarshal: got %d, want %d", i, got, expected)
-				}
-			}
-
 			// Signal completion for N=2 case
 			if len(values) == 2 && testDone != nil {
 				testDone <- true

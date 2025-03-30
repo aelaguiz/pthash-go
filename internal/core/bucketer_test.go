@@ -463,6 +463,14 @@ func TestBucketerSerialization(t *testing.T) {
 				// This should not happen if the types are correct
 				t.Fatalf("Failed type assertion during unmarshal setup for type %s", concretePtrType.String())
 			}
+
+			// Special handling for TableBucketer to initialize its inner base properly
+			if name == "Table" {
+				if tableBucketer, isTable := b2.(*TableBucketer[*OptBucketer]); isTable {
+					// Initialize inner OptBucketer to avoid nil pointer
+					tableBucketer.base = &OptBucketer{}
+				}
+			}
 			// --- End Corrected Unmarshaling Setup ---
 
 			err = serial.TryUnmarshal(b2, data) // Unmarshal into the newly created pointer instance

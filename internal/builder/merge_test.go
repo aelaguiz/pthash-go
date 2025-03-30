@@ -182,3 +182,105 @@ func TestBucketsIterator(t *testing.T) {
 	}
 
 }
+
+// Add these tests to internal/builder/merge_test.go
+
+func TestMergeEdgeCases(t *testing.T) {
+	t.Run("EmptyInput", func(t *testing.T) {
+		blocks := []pairsT{}
+		merger := newBucketsT()
+		err := mergeMultipleBlocks(blocks, merger, false, false)
+		if err != nil {
+			t.Fatalf("mergeMultipleBlocks failed: %v", err)
+		}
+		if merger.numBuckets() != 0 {
+			t.Errorf("Expected 0 buckets, got %d", merger.numBuckets())
+		}
+	})
+
+	t.Run("OneEmptyBlock", func(t *testing.T) {
+		blocks := []pairsT{
+			{{1, 10}, {1, 11}},
+			{}, // Empty block
+			{{2, 20}},
+		}
+		merger := newBucketsT()
+		err := mergeMultipleBlocks(blocks, merger, false, false)
+		if err != nil {
+			t.Fatalf("mergeMultipleBlocks failed: %v", err)
+		}
+		if merger.numBuckets() != 2 {
+			t.Errorf("Expected 2 buckets, got %d", merger.numBuckets())
+		}
+	})
+
+	t.Run("AllEmptyBlocks", func(t *testing.T) {
+		blocks := []pairsT{{}, {}, {}}
+		merger := newBucketsT()
+		err := mergeMultipleBlocks(blocks, merger, false, false)
+		if err != nil {
+			t.Fatalf("mergeMultipleBlocks failed: %v", err)
+		}
+		if merger.numBuckets() != 0 {
+			t.Errorf("Expected 0 buckets, got %d", merger.numBuckets())
+		}
+	})
+
+	t.Run("SingleItemBlocks", func(t *testing.T) {
+		blocks := []pairsT{
+			{{3, 30}},
+			{{1, 10}},
+			{{5, 50}},
+			{{2, 20}},
+		}
+		// Sort blocks first if needed by merge logic (current Go merge uses heap, order doesn't matter)
+		merger := newBucketsT()
+		err := mergeMultipleBlocks(blocks, merger, false, false)
+		if err != nil {
+			t.Fatalf("mergeMultipleBlocks failed: %v", err)
+		}
+		if merger.numBuckets() != 4 {
+			t.Errorf("Expected 4 buckets, got %d", merger.numBuckets())
+		}
+		// Check one bucket
+		iter := merger.iterator()
+		found5 := false
+		for iter.HasNext() {
+			b := iter.Next()
+			if b.ID() == 5 && b.Size() == 1 && b.Payloads()[0] == 50 {
+				found5 = true
+				break
+			}
+		}
+		if !found5 {
+			t.Error("Did not find bucket ID=5 correctly merged")
+		}
+	})
+
+	t.Run("AlternatingBlocks", func(t *testing.T) {
+		// Simulate items for buckets 1, 2, 3 alternating across blocks
+		blocks := []pairsT{
+			{{1, 10}, {3, 30}},
+			{{2, 20}},
+			{{1, 11}, {3, 31}},
+			{{2, 21}},
+		}
+		merger := newBucketsT()
+		err := mergeMultipleBlocks(blocks, merger, false, false)
+		if err != nil {
+			t.Fatalf("mergeMultipleBlocks failed: %v", err)
+		}
+		if merger.numBuckets() != 3 {
+			t.Errorf("Expected 3 buckets, got %d", merger.numBuckets())
+		}
+		iter := merger.iterator()
+		found := map[core.BucketIDType]int{}
+		for iter.HasNext() {
+			b := iter.Next()
+			found[b.ID()] = int(b.Size())
+		}
+		if found[1] != 2 || found[2] != 2 || found[3] != 2 {
+			t.Errorf("Bucket sizes incorrect: got %v, want map[1:2 2:2 3:2]", found)
+		}
+	})
+}

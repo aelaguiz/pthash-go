@@ -205,7 +205,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 		for _, key := range keys {
 			hash := pb.hasher.Hash(key, pb.seed)
 			partitionIdx := pb.partitioner.Bucket(hash.Mix())
-			if partitionIdx >= pb.numPartitions {
+			if uint64(partitionIdx) >= pb.numPartitions {
 				return pb.timings, fmt.Errorf("internal error: partition index %d out of bounds (%d)", partitionIdx, pb.numPartitions)
 			}
 			pb.partitionBuffers[partitionIdx] = append(pb.partitionBuffers[partitionIdx], hash)
@@ -311,6 +311,20 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) BuildFromKeys(keys []K, 
 func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) parallelHashAndPartition(keys []K, partitionBuffers [][]core.Hash128) {
 	numKeys := uint64(len(keys))
 	numThreads := pb.config.NumThreads
+
+	// *** ADD CHECKS AND LOGGING ***
+	util.Log(pb.config.Verbose, "[DEBUG] parallelHashAndPartition: numKeys=%d, numThreads=%d, numPartitions=%d", numKeys, numThreads, pb.numPartitions)
+
+	if numThreads <= 0 {
+		// Fallback to sequential or error out. Let's error out for clarity.
+		panic(fmt.Sprintf("parallelHashAndPartition called with invalid numThreads: %d", numThreads))
+	}
+	if pb.numPartitions == 0 {
+		// This shouldn't happen if checked earlier, but good defense.
+		panic(fmt.Sprintf("parallelHashAndPartition called with zero numPartitions"))
+	}
+	// *** END CHECKS ***
+
 	keysPerThread := numKeys / uint64(numThreads)
 	bufferMutexes := make([]sync.Mutex, pb.numPartitions)
 	var wg sync.WaitGroup
@@ -331,7 +345,7 @@ func (pb *InternalMemoryBuilderPartitionedPHF[K, H, B]) parallelHashAndPartition
 				key := keys[i]
 				hash := pb.hasher.Hash(key, pb.seed)
 				partitionIdx := pb.partitioner.Bucket(hash.Mix())
-				localBuffers[partitionIdx] = append(localBuffers[partitionIdx], hash)
+				localBuffers[uint64(partitionIdx)] = append(localBuffers[uint64(partitionIdx)], hash)
 			}
 
 			// Append thread-local results to global buffers under lock
