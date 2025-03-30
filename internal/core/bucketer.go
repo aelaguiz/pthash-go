@@ -100,14 +100,45 @@ func (b *SkewBucketer) NumBits() uint64 {
 
 // MarshalBinary implements encoding.BinaryMarshaler.
 func (b *SkewBucketer) MarshalBinary() ([]byte, error) {
-	// TODO: Serialize numDenseBuckets, numSparseBuckets, mNumDenseBuckets, mNumSparseBuckets
-	return nil, fmt.Errorf("SkewBucketer.MarshalBinary not implemented")
+	buf := make([]byte, 8+8+16+16) // numDense, numSparse, M64_dense, M64_sparse
+	offset := 0
+	binary.LittleEndian.PutUint64(buf[offset:], b.numDenseBuckets)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.numSparseBuckets)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.mNumDenseBuckets[0]) // Low
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.mNumDenseBuckets[1]) // High
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.mNumSparseBuckets[0]) // Low
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.mNumSparseBuckets[1]) // High
+	return buf, nil
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (b *SkewBucketer) UnmarshalBinary(data []byte) error {
-	// TODO: Deserialize fields
-	return fmt.Errorf("SkewBucketer.UnmarshalBinary not implemented")
+	if len(data) < (8 + 8 + 16 + 16) {
+		return io.ErrUnexpectedEOF
+	}
+	offset := 0
+	b.numDenseBuckets = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	b.numSparseBuckets = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	b.mNumDenseBuckets[0] = binary.LittleEndian.Uint64(data[offset:]) // Low
+	offset += 8
+	b.mNumDenseBuckets[1] = binary.LittleEndian.Uint64(data[offset:]) // High
+	offset += 8
+	b.mNumSparseBuckets[0] = binary.LittleEndian.Uint64(data[offset:]) // Low
+	offset += 8
+	b.mNumSparseBuckets[1] = binary.LittleEndian.Uint64(data[offset:]) // High
+	// Basic validation
+	if b.numDenseBuckets+b.numSparseBuckets == 0 && (len(data) != (8+8+16+16)) {
+		// Allow 0 buckets, but data should match size
+		return fmt.Errorf("skew bucketer consistency error after unmarshal")
+	}
+	return nil
 }
 
 // --- UniformBucketer Implementation ---
@@ -147,14 +178,28 @@ func (b *UniformBucketer) NumBits() uint64 {
 
 // MarshalBinary implements encoding.BinaryMarshaler.
 func (b *UniformBucketer) MarshalBinary() ([]byte, error) {
-	// TODO: Serialize numBuckets and mNumBuckets
-	return nil, fmt.Errorf("UniformBucketer.MarshalBinary not implemented")
+	buf := make([]byte, 8+16) // numBuckets, M64
+	offset := 0
+	binary.LittleEndian.PutUint64(buf[offset:], b.numBuckets)
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.mNumBuckets[0]) // Low
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], b.mNumBuckets[1]) // High
+	return buf, nil
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (b *UniformBucketer) UnmarshalBinary(data []byte) error {
-	// TODO: Deserialize fields
-	return fmt.Errorf("UniformBucketer.UnmarshalBinary not implemented")
+	if len(data) < (8 + 16) {
+		return io.ErrUnexpectedEOF
+	}
+	offset := 0
+	b.numBuckets = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	b.mNumBuckets[0] = binary.LittleEndian.Uint64(data[offset:]) // Low
+	offset += 8
+	b.mNumBuckets[1] = binary.LittleEndian.Uint64(data[offset:]) // High
+	return nil
 }
 
 // --- RangeBucketer Implementation (for partitioning) ---
@@ -478,14 +523,78 @@ func (tb *TableBucketer[Base]) NumBits() uint64 {
 	return baseBits + fulcrumBits + numBucketsBits
 }
 
-// MarshalBinary placeholder
+// MarshalBinary implements encoding.BinaryMarshaler.
 func (tb *TableBucketer[Base]) MarshalBinary() ([]byte, error) {
-	// TODO: Marshal base, fulcrums, numBuckets
-	return nil, fmt.Errorf("TableBucketer.MarshalBinary not implemented")
+	// 1. Marshal base
+	baseData, err := serial.TryMarshal(tb.base) // Marshals the actual base instance (value or pointer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal base bucketer: %w", err)
+	}
+
+	// 2. Calculate size: numBuckets(8) + baseLen(8) + baseData + fulcrums (fixed size)
+	fulcrumSize := fulcrumCount * 8
+	totalSize := 8 + 8 + len(baseData) + fulcrumSize
+	buf := make([]byte, totalSize)
+	offset := 0
+
+	// 3. Write numBuckets
+	binary.LittleEndian.PutUint64(buf[offset:], tb.numBuckets)
+	offset += 8
+
+	// 4. Write base bucketer
+	binary.LittleEndian.PutUint64(buf[offset:], uint64(len(baseData)))
+	offset += 8
+	copy(buf[offset:], baseData)
+	offset += len(baseData)
+
+	// 5. Write fulcrums
+	for _, f := range tb.fulcrums {
+		binary.LittleEndian.PutUint64(buf[offset:], f)
+		offset += 8
+	}
+
+	if offset != totalSize {
+		return nil, fmt.Errorf("TableBucketer marshal size mismatch")
+	}
+	return buf, nil
 }
 
-// UnmarshalBinary placeholder
+// UnmarshalBinary implements encoding.BinaryUnmarshaler.
 func (tb *TableBucketer[Base]) UnmarshalBinary(data []byte) error {
-	// TODO: Unmarshal base, fulcrums, numBuckets
-	return fmt.Errorf("TableBucketer.UnmarshalBinary not implemented")
+	if len(data) < 16 { // Need at least numBuckets + baseLen
+		return io.ErrUnexpectedEOF
+	}
+	offset := 0
+
+	// 1. Read numBuckets
+	tb.numBuckets = binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+
+	// 2. Read base bucketer
+	baseLen := binary.LittleEndian.Uint64(data[offset:])
+	offset += 8
+	if uint64(offset)+baseLen > uint64(len(data)) {
+		return io.ErrUnexpectedEOF
+	}
+	// Unmarshal into the existing tb.base (must be addressable)
+	err := serial.TryUnmarshal(&tb.base, data[offset:offset+int(baseLen)])
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal base bucketer: %w", err)
+	}
+	offset += int(baseLen)
+
+	// 3. Read fulcrums
+	fulcrumSize := fulcrumCount * 8
+	if offset+fulcrumSize > len(data) {
+		return io.ErrUnexpectedEOF
+	}
+	for i := 0; i < fulcrumCount; i++ {
+		tb.fulcrums[i] = binary.LittleEndian.Uint64(data[offset:])
+		offset += 8
+	}
+
+	if offset != len(data) {
+		return fmt.Errorf("extra data after TableBucketer unmarshal")
+	}
+	return nil
 }

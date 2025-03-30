@@ -53,6 +53,48 @@ func TestDenseMonoAccess(t *testing.T) {
 	}
 }
 
+func TestDenseMonoSerialization(t *testing.T) {
+	type E = RiceEncoder // Use Rice as underlying for test
+	dm1 := DenseMono[*E]{}
+	// Simulate encoding
+	dm1.NumPartitions = 5
+	pilots := make([]uint64, 5*3) // 5 partitions, 3 buckets
+	for i := range pilots {
+		pilots[i] = uint64(i * 10)
+	}
+	dm1.Encoder = &E{} // Allocate pointer
+	err := dm1.Encoder.Encode(pilots)
+	if err != nil {
+		if IsD1ArraySelectStubbed() { t.Skip("Skipping: D1Array stubbed"); return }
+		t.Fatalf("Encode failed: %v", err)
+	}
+
+	data, err := dm1.MarshalBinary()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	dm2 := DenseMono[*E]{}
+	err = dm2.UnmarshalBinary(data)
+	if err != nil {
+		if IsD1ArraySelectStubbed() { t.Skip("Skipping: D1Array stubbed"); return }
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if dm1.NumPartitions != dm2.NumPartitions {
+		t.Errorf("NumPartitions mismatch: %d != %d", dm1.NumPartitions, dm2.NumPartitions)
+	}
+	if dm1.Encoder == nil || dm2.Encoder == nil {
+		t.Fatalf("Encoder is nil after unmarshal")
+	}
+	if dm1.Encoder.Size() != dm2.Encoder.Size() {
+		t.Errorf("Encoder size mismatch: %d != %d", dm1.Encoder.Size(), dm2.Encoder.Size())
+	}
+	if dm1.AccessDense(2, 1) != dm2.AccessDense(2, 1) {
+		t.Errorf("AccessDense mismatch")
+	}
+}
+
 func TestDenseInterleavedAccess(t *testing.T) {
 	numPartitions := uint64(10)
 	numBuckets := uint64(5)
