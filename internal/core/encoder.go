@@ -380,15 +380,18 @@ func NewEliasFano() *EliasFano {
 // Encode builds the Elias-Fano structure from a sorted slice of values.
 // Input values MUST be monotonically increasing.
 func (ef *EliasFano) Encode(sortedValues []uint64) error {
+	log.Printf("[DEBUG EF.Encode] ENTER N=%d", len(sortedValues))
 	n := uint64(len(sortedValues))
 	ef.numValues = n
 
 	if n == 0 {
+		log.Printf("[DEBUG EF.Encode] n=0, initializing empty.")
 		ef.universe = 0
 		ef.numLowBits = 0
 		ef.lowerBits = NewCompactVector(0, 0)
 		// upperBitsSelect should contain an empty BitVector
 		ef.upperBitsSelect = NewD1Array(NewBitVector(0))
+		log.Printf("[DEBUG EF.Encode] EXIT OK (Empty)")
 		return nil
 	}
 
@@ -396,13 +399,17 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 	if n > 0 {
 		u = sortedValues[n-1] + 1
 		// Check monotonicity (optional, but good practice)
+		log.Printf("[DEBUG EF.Encode] Checking monotonicity...")
 		for i := uint64(1); i < n; i++ {
 			if sortedValues[i] < sortedValues[i-1] {
+				log.Printf("[ERROR EF.Encode] Monotonicity check failed at index %d", i)
 				return fmt.Errorf("EliasFano.Encode input must be monotonically increasing (value[%d]=%d < value[%d]=%d)", i, sortedValues[i], i-1, sortedValues[i-1])
 			}
 		}
+		log.Printf("[DEBUG EF.Encode] Monotonicity OK.")
 	}
 	ef.universe = u
+	log.Printf("[DEBUG EF.Encode] Calculated U=%d", ef.universe)
 
 	l := uint8(0)
 	if n > 0 && u > n {
@@ -410,20 +417,26 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 		lFloat := math.Log2(ratio) // Use Log2 directly
 		if lFloat >= 0 {           // Ensure non-negative before floor
 			l = uint8(math.Floor(lFloat))
+		} else {
+			log.Printf("[DEBUG EF.Encode] Log2(ratio) was negative (%.2f), setting l=0", lFloat)
 		}
 	}
 	if l > 64 {
 		l = 64
 	} // Clamp
 	ef.numLowBits = l
+	log.Printf("[DEBUG EF.Encode] Calculated L=%d", ef.numLowBits)
 
 	upperBitsSizeEstimate := uint64(0)
 	if u > 0 && l < 64 {
-		upperBitsSizeEstimate = n + n*(u>>l)
+		// Corrected estimate: Should be n + (last_high_part)
+		// last_high_part = sortedValues[n-1] >> l
+		upperBitsSizeEstimate = n + (sortedValues[n-1] >> l)
 	} else {
 		upperBitsSizeEstimate = n
 	}
 	upperBitsSizeEstimate += 100
+	log.Printf("[DEBUG EF.Encode] upperBits size estimate = %d", upperBitsSizeEstimate)
 
 	lbBuilder := NewCompactVectorBuilder(n, l)
 	ubBuilder := NewBitVectorBuilder(upperBitsSizeEstimate)
@@ -432,38 +445,52 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 	mask := uint64(0)
 	if l < 64 {
 		mask = (uint64(1) << l) - 1
-	} else {
+	} else if l == 64 { // Correct handling for l=64
 		mask = ^uint64(0)
 	}
 
 	for i, v := range sortedValues {
 		low := uint64(0)
 		high := uint64(0)
-		if l < 64 {
+		if l < 64 && l > 0 { // Correct handling for l=0
 			low = v & mask
 			high = v >> l
-		} else {
+		} else if l == 64 { // Handle l=64 case
 			low = v
+			high = 0 // No high part if l=64
+		} else { // l == 0
+			low = 0 // No low part if l=0
+			high = v
 		}
 
 		lbBuilder.Set(uint64(i), low)
 
 		delta := high - lastHighPart
+		// Log delta only if it's large or for debugging specific indices
+		// if delta > 10 || i < 5 || i > int(n)-5 {
+		//     log.Printf("[DEBUG EF.Encode] i=%d, v=%d, high=%d, lastHigh=%d, delta=%d", i, v, high, lastHighPart, delta)
+		// }
 		for k := uint64(0); k < delta; k++ {
 			ubBuilder.PushBack(false)
 		} // 0
 		ubBuilder.PushBack(true) // 1
 		lastHighPart = high
 	}
+	log.Printf("[DEBUG EF.Encode] Finished building lowerBits and upperBits vectors.")
 
 	ef.lowerBits = lbBuilder.Build()
 	upperBitsBV := ubBuilder.Build()             // Build the final bit vector
+	log.Printf("[DEBUG EF.Encode] upperBitsBV size = %d, numWords = %d", upperBitsBV.Size(), upperBitsBV.NumWords())
 	ef.upperBitsSelect = NewD1Array(upperBitsBV) // Build D1Array on the BV
+	log.Printf("[DEBUG EF.Encode] D1Array built. numSetBits=%d", ef.upperBitsSelect.numSetBits)
 
 	if ef.upperBitsSelect.numSetBits != n {
+		log.Printf("[ERROR EF.Encode] Set bit count mismatch: D1Array has %d, expected %d", ef.upperBitsSelect.numSetBits, n)
 		return fmt.Errorf("internal EliasFano error: upperBitsSelect has %d set bits, expected %d", ef.upperBitsSelect.numSetBits, n)
 	}
 
+	log.Printf("[DEBUG EF.Encode] EXIT OK. Final L=%d, U=%d, N=%d, LowerBitsSize=%d, UpperBitsSize=%d, D1ArrayBits=%d",
+		ef.numLowBits, ef.universe, ef.numValues, ef.lowerBits.NumBitsStored(), ef.upperBitsSelect.bv.NumBitsStored(), ef.upperBitsSelect.NumBits())
 	return nil
 }
 
@@ -608,10 +635,19 @@ func IsEliasFanoStubbed() bool {
 	ef := NewEliasFano()
 	// A simple check: if NumBits is very small for a non-empty structure, it's likely a stub.
 	// Let's encode a single value and check NumBits.
+	log.Printf("[DEBUG IsEliasFanoStubbed] Encoding [10]...")
 	err := ef.Encode([]uint64{10})
+	if err != nil {
+		log.Printf("[DEBUG IsEliasFanoStubbed] Encode returned error: %v", err)
+		// If Encode itself fails, consider it stubbed/broken
+		return true
+	}
 	// A real EF should use more bits than just the base field sizes (~24 bytes = 192 bits)
 	// A stub might only marshal the metadata. Let's use a threshold like 64 bytes = 512 bits.
-	return err != nil || ef.NumBits() < 512
+	numBits := ef.NumBits()
+	stubbed := numBits < 512
+	log.Printf("[DEBUG IsEliasFanoStubbed] NumBits after encoding [10] = %d. Is stubbed? %t", numBits, stubbed)
+	return stubbed
 }
 
 // --- Placeholder Dictionary/SDC/Dual etc. ---
