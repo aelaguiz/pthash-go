@@ -383,15 +383,29 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	}
 	bucketerLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+bucketerLen > uint64(len(data)) {
+	bucketerEndOffset := offset + int(bucketerLen)
+	if uint64(bucketerEndOffset) > uint64(len(data)) {
 		return io.ErrUnexpectedEOF
 	}
-	// Unmarshal into the existing f.bucketer (assuming it's addressable or pointer)
-	err := serial.TryUnmarshal(&f.bucketer, data[offset:offset+int(bucketerLen)])
+	// --- FIX START ---
+	var zeroB B                          // Get zero value of type B
+	typeB := reflect.TypeOf(zeroB)       // Get reflect.Type
+	targetBucketerPtr := &f.bucketer     // Default: address for value types
+
+	if typeB != nil && typeB.Kind() == reflect.Ptr {
+		// B is a pointer type (e.g., *core.SkewBucketer)
+		elemType := typeB.Elem()                 // Get underlying struct type (e.g., core.SkewBucketer)
+		newInstance := reflect.New(elemType)     // Create *core.SkewBucketer as reflect.Value
+		f.bucketer = newInstance.Interface().(B) // Assign the new pointer to f.bucketer
+		targetBucketerPtr = f.bucketer           // Pass the pointer itself to TryUnmarshal
+	}
+	// Now call TryUnmarshal with the correct pointer (either the field address or the newly allocated pointer)
+	err := serial.TryUnmarshal(targetBucketerPtr, data[offset:bucketerEndOffset])
+	// --- FIX END ---
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal bucketer: %w", err)
 	}
-	offset += int(bucketerLen)
+	offset = bucketerEndOffset
 
 	// 4. Read Pilots
 	if offset+8 > len(data) {
@@ -399,14 +413,29 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	}
 	pilotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+pilotsLen > uint64(len(data)) {
+	pilotsEndOffset := offset + int(pilotsLen)
+	if uint64(pilotsEndOffset) > uint64(len(data)) {
 		return io.ErrUnexpectedEOF
 	}
-	err = serial.TryUnmarshal(&f.pilots, data[offset:offset+int(pilotsLen)])
+	// --- FIX START ---
+	var zeroE E                      // Get zero value of type E
+	typeE := reflect.TypeOf(zeroE)   // Get reflect.Type
+	targetPilotsPtr := &f.pilots     // Default: address for value types
+
+	if typeE != nil && typeE.Kind() == reflect.Ptr {
+		// E is a pointer type (e.g., *core.RiceEncoder)
+		elemType := typeE.Elem()                 // Get underlying type (e.g., core.RiceEncoder)
+		newInstance := reflect.New(elemType)     // Create *core.RiceEncoder as reflect.Value
+		f.pilots = newInstance.Interface().(E)   // Assign the new pointer to f.pilots
+		targetPilotsPtr = f.pilots               // Pass the pointer itself to TryUnmarshal
+	}
+	// Now call TryUnmarshal with the correct pointer
+	err = serial.TryUnmarshal(targetPilotsPtr, data[offset:pilotsEndOffset])
+	// --- FIX END ---
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal pilots: %w", err)
 	}
-	offset += int(pilotsLen)
+	offset = pilotsEndOffset
 
 	// 5. Read Free Slots
 	if offset+8 > len(data) {
@@ -414,12 +443,13 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	}
 	freeSlotsLen := binary.LittleEndian.Uint64(data[offset : offset+8])
 	offset += 8
-	if uint64(offset)+freeSlotsLen > uint64(len(data)) {
+	freeSlotsEndOffset := offset + int(freeSlotsLen)
+	if uint64(freeSlotsEndOffset) > uint64(len(data)) {
 		return io.ErrUnexpectedEOF
 	}
 	if freeSlotsLen > 0 {
 		f.freeSlots = core.NewEliasFano() // Create instance before unmarshaling
-		err = serial.TryUnmarshal(f.freeSlots, data[offset:offset+int(freeSlotsLen)])
+		err = serial.TryUnmarshal(f.freeSlots, data[offset:freeSlotsEndOffset])
 		if err != nil {
 			f.freeSlots = nil // Ensure nil on error
 			return fmt.Errorf("failed to unmarshal free slots: %w", err)
@@ -427,7 +457,7 @@ func (f *SinglePHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 	} else {
 		f.freeSlots = nil // Explicitly set nil if length is 0
 	}
-	offset += int(freeSlotsLen)
+	offset = freeSlotsEndOffset
 
 	if offset != len(data) {
 		return fmt.Errorf("extra data detected after unmarshaling (%d bytes remain)", len(data)-offset)
