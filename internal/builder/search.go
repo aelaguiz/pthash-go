@@ -7,6 +7,7 @@ import (
 	"pthashgo/internal/util"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,12 +78,11 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	return err
 }
 
-// searchSequentialXOR finds pilots sequentially using XOR displacement.
 func searchSequentialXOR(
 	numKeys, numBuckets, numNonEmptyBuckets, seed uint64,
 	config *core.BuildConfig,
 	bucketsIt *bucketsIteratorT,
-	taken *core.BitVectorBuilder, // NOTE: Need concurrent access or atomic ops for parallel
+	taken *core.BitVectorBuilder, // For sequential, direct access is safe
 	pilots PilotsBuffer,
 	logger *SearchLogger,
 	hashedPilotsCache []uint64,
@@ -90,119 +90,160 @@ func searchSequentialXOR(
 	tableSize uint64,
 ) error {
 	positions := make([]uint64, 0, core.MaxBucketSize) // Preallocate for max possible size
-
 	processedBuckets := uint64(0)
 	searchStartTime := time.Now()
-	log.Printf("Starting searchSequentialXOR: numKeys=%d, numBuckets=%d, tableSize=%d",
+	util.Log(config.Verbose, "Starting searchSequentialXOR: numKeys=%d, numBuckets=%d, tableSize=%d",
 		numKeys, numBuckets, tableSize)
 
 	for bucketsIt.HasNext() {
-		bucketStartTime := time.Now()
-		log.Printf("Processing bucket %d of %d (%v elapsed since search start)",
-			processedBuckets+1, numNonEmptyBuckets, time.Since(searchStartTime))
-
 		bucket := bucketsIt.Next()
 		bucketSize := bucket.Size()
 		if bucketSize == 0 {
-			log.Printf("WARNING: Empty bucket encountered (should not happen)")
-			continue // Should not happen with non-empty count, but safe check
+			util.Log(config.Verbose, "WARNING: Empty bucket encountered (should not happen)")
+			continue
 		}
 		bucketID := bucket.ID()
 		payloads := bucket.Payloads()
-		log.Printf("Bucket %d: size=%d, payloads=%v", bucketID, bucketSize, payloads)
+
+		// Timing and initial logging for the bucket
+		pilotSearchStartTime := time.Now()
+		if config.Verbose {
+			log.Printf("Processing bucket %d (ID: %d) of %d, size: %d (%v elapsed since search start)",
+				processedBuckets+1, bucketID, numNonEmptyBuckets, bucketSize, time.Since(searchStartTime))
+			// Optionally log payloads only if size is small or debugging intensely
+			// if bucketSize < 10 { log.Printf("  Payloads: %v", payloads) }
+		}
+
+		// Deep Debugging Control
+		enableDeepDebug := false
+		const deepDebugPilotThreshold = 2_000_000 // Log details if search exceeds this many pilots
 
 		foundPilot := false
-		pilotSearchStartTime := time.Now()
-		for pilot := uint64(0); ; pilot++ {
-			// Log progress every 100,000 iterations
-			if pilot > 0 && pilot%100000 == 0 {
-				log.Printf("WARNING: Still searching bucket %d (size %d) - tried %d pilots over %v",
-					bucketID, bucketSize, pilot, time.Since(pilotSearchStartTime))
-				log.Printf("Payloads: %v", payloads)
+		for pilot := uint64(0); ; pilot++ { // Continue until pilot found or limit hit
+
+			if pilot >= maxPilotAttempts {
+				util.Log(config.Verbose, "ERROR: Pilot search limit (%d) reached for bucket %d (size %d)", maxPilotAttempts, bucketID, bucketSize)
+				// Log the problematic payloads when the limit is hit
+				log.Printf("FAILING BUCKET %d PAYLOADS: %v", bucketID, payloads)
+				return core.SeedRuntimeError{Msg: fmt.Sprintf("pilot search limit reached for bucket %d", bucketID)}
 			}
 
+			// Activate deep debug if search is taking long
+			if config.Verbose && !enableDeepDebug && pilot == deepDebugPilotThreshold {
+				log.Printf("DEEP DEBUG [XOR]: Starting detailed logging for slow bucket %d (size %d)", bucketID, bucketSize)
+				enableDeepDebug = true
+			}
+
+			// Occasional progress update for long searches (less frequent than deep debug)
+			if config.Verbose && !enableDeepDebug && pilot > 0 && pilot%10_000_000 == 0 {
+				log.Printf("INFO [XOR]: Still searching bucket %d (size %d) - tried %dM pilots over %v",
+					bucketID, bucketSize, pilot/1000000, time.Since(pilotSearchStartTime))
+			}
+
+			// --- Calculate Pilot Hash ---
 			hashedPilot := uint64(0)
 			if pilot < searchCacheSize {
 				hashedPilot = hashedPilotsCache[pilot]
 			} else {
-				hashedPilot = core.DefaultHash64(pilot, seed)
+				hashedPilot = core.DefaultHash64(pilot, seed) // Use the main config seed
 			}
 
-			positions = positions[:0] // Clear slice, keep capacity
-			collisionFound := false
+			// --- Check Collisions for this Pilot ---
+			positions = positions[:0] // Reset positions slice for this attempt
+			externalCollision := false
+			internalCollision := false
+			var collisionDetails strings.Builder // Buffer for deep debug output
 
-			// For extensive debugging when stuck
-			if pilot > 0 && pilot%1000000 == 0 { // Log details once per million attempts
-				log.Printf("Detail for bucket %d (pilot=%d): tableSize=%d", bucketID, pilot, tableSize)
+			if enableDeepDebug {
+				fmt.Fprintf(&collisionDetails, "  Bucket %d / Pilot %d (hashed=%d):\n", bucketID, pilot, hashedPilot)
 			}
 
-			for i, pld := range payloads {
-				hash := pld // In single PHF, payload is hash.Second()
+			// 1. Check for external collisions (vs 'taken') and collect positions
+			for idx, pld := range payloads {
+				hash := pld // Payload is hash.Second()
 				p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
+				positions = append(positions, p) // Always collect for internal check
 
-				// Log detailed collision info occasionally
-				if pilot > 0 && pilot%1000000 == 0 {
-					log.Printf("  Payload[%d]=%d, XOR=%d, Position=%d, Taken=%v",
-						i, pld, hash^hashedPilot, p, taken.Get(p))
+				isTaken := taken.Get(p)
+				if enableDeepDebug {
+					fmt.Fprintf(&collisionDetails, "    Payload[%2d]=%d -> XOR=%d -> Pos=%-5d -> Taken=%t\n",
+						idx, pld, hash^hashedPilot, p, isTaken)
 				}
-
-				// Check collision with already taken slots
-				if taken.Get(p) {
-					if pilot > 0 && pilot%1000000 == 0 {
-						log.Printf("  Collision at position %d for payload %d", p, pld)
+				if isTaken {
+					externalCollision = true
+					if enableDeepDebug {
+						fmt.Fprintf(&collisionDetails, "    -> External collision at pos %d\n", p)
+						// Don't break in deep debug, collect all info
+					} else {
+						break // Optimization: Stop checking payloads if external collision found
 					}
-					collisionFound = true
-					break
 				}
-				positions = append(positions, p)
 			}
 
-			if collisionFound {
-				continue // Try next pilot
-			}
-
-			// Check for in-bucket collisions
-			sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
-			inBucketCollision := false
-			for i := 1; i < len(positions); i++ {
-				if positions[i] == positions[i-1] {
-					if pilot > 0 && pilot%1000000 == 0 {
-						log.Printf("  In-bucket collision: position %d appears multiple times", positions[i])
+			// 2. Check for internal collisions (within the bucket for this pilot)
+			//    Only necessary if no external collisions were found (unless deep debugging)
+			if !externalCollision || enableDeepDebug {
+				if len(positions) > 1 { // Only need to sort if more than one element
+					sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+					for i := 1; i < len(positions); i++ {
+						if positions[i] == positions[i-1] {
+							internalCollision = true
+							if enableDeepDebug {
+								fmt.Fprintf(&collisionDetails, "    -> Internal collision at pos %d\n", positions[i])
+								// Don't break in deep debug
+							} else {
+								break // Optimization: Stop checking if internal collision found
+							}
+						}
 					}
-					inBucketCollision = true
-					break
 				}
 			}
-			if inBucketCollision {
-				continue // Try next pilot
+
+			// --- Log deep debug info if enabled ---
+			if enableDeepDebug {
+				if !externalCollision && !internalCollision {
+					fmt.Fprint(&collisionDetails, "    -> OK: No collisions found\n")
+				}
+				log.Print(collisionDetails.String()) // Print collected details for this pilot
 			}
 
-			// Pilot found!
-			pilots.EmplaceBack(bucketID, pilot)
-			log.Printf("Found pilot %d for bucket %d after %v",
-				pilot, bucketID, time.Since(bucketStartTime))
-
-			for _, p := range positions {
-				taken.Set(p) // Mark slots as taken
+			// --- Decide next step ---
+			if externalCollision || internalCollision {
+				continue // Collision found, try the next pilot
 			}
-			logger.Update(processedBuckets, bucketSize)
+
+			// --- Pilot Found! ---
 			foundPilot = true
-			break // Move to next bucket
-		}
-		// C++ has check `if (bucket_begin == bucket_end)` which seems redundant if inner loops break
-		// Let's add a check in case the inner loop somehow exits without finding a pilot (should be impossible?)
+			pilots.EmplaceBack(bucketID, pilot) // Store the successful pilot
+			for _, p := range positions {
+				taken.Set(p) // Mark slots as taken *after* success confirmation
+			}
+			logger.Update(processedBuckets, bucketSize) // Update progress
+
+			if config.Verbose { // Log success details, especially if it was slow
+				searchDuration := time.Since(pilotSearchStartTime)
+				if searchDuration > 50*time.Millisecond || pilot >= deepDebugPilotThreshold {
+					log.Printf("INFO [XOR]: Found pilot %d for bucket %d (size %d) after %v",
+						pilot, bucketID, bucketSize, searchDuration)
+				}
+			}
+			break // Exit the pilot search loop for this bucket
+		} // End pilot search loop
+
 		if !foundPilot {
-			// This indicates an issue, likely requires a new seed.
-			return core.SeedRuntimeError{Msg: fmt.Sprintf("could not find pilot for bucket %d", bucketID)}
+			// This path should now only be reachable if maxPilotAttempts is hit
+			// The error is returned inside the loop upon hitting the limit
+			// This panic is a safeguard against unexpected loop termination.
+			panic(fmt.Sprintf("Internal Error: Pilot search loop for bucket %d exited without finding pilot or hitting limit", bucketID))
 		}
 		processedBuckets++
-	}
+	} // End bucket iteration
+
 	if processedBuckets != numNonEmptyBuckets {
-		// This might indicate an issue with the iterator or non-empty count
-		util.Log(config.Verbose, "Warning: Processed %d buckets, expected %d non-empty", processedBuckets, numNonEmptyBuckets)
+		util.Log(config.Verbose, "Warning (XOR): Processed %d buckets, expected %d non-empty", processedBuckets, numNonEmptyBuckets)
 	}
 
-	return nil
+	return nil // Success
 }
 
 // searchParallelXOR finds pilots in parallel using XOR displacement.
