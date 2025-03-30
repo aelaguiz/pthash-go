@@ -101,8 +101,9 @@ func (dm *DenseMono[E]) AccessDense(partition uint64, bucket uint64) uint64 {
 	return dm.Encoder.Access(idx)
 }
 func (dm *DenseMono[E]) MarshalBinary() ([]byte, error) {
-	// Marshal the Encoder field itself (pass address for consistency)
-	encData, err := serial.TryMarshal(&dm.Encoder)
+	// Marshal the Encoder field directly, not its address
+	// This avoids double pointer issues when E is already a pointer type
+	encData, err := serial.TryMarshal(dm.Encoder)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal underlying encoder: %w", err)
 	}
@@ -285,8 +286,9 @@ func (di *DenseInterleaved[E]) MarshalBinary() ([]byte, error) {
 	encodedData := make([][]byte, numEncoders)
 	totalDataLen := 0
 	for i, enc := range di.Encoders {
-		// Marshal the encoder itself (pass address)
-		data, err := serial.TryMarshal(&enc) // Pass address of slice element
+		// Marshal the encoder directly, not its address
+		// This avoids double pointer issues when E is already a pointer type
+		data, err := serial.TryMarshal(enc)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal encoder %d: %w", i, err)
 		}
@@ -452,8 +454,9 @@ func (de *DiffEncoder[E]) NumBits() uint64 {
 }
 
 func (de *DiffEncoder[E]) MarshalBinary() ([]byte, error) {
-	// Marshal the Encoder field itself (pass address)
-	encData, err := serial.TryMarshal(&de.Encoder) // Pass address
+	// Marshal the Encoder field directly, not its address
+	// This avoids double pointer issues when E is already a pointer type
+	encData, err := serial.TryMarshal(de.Encoder) // Pass the value directly
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal underlying encoder: %w", err)
 	}
