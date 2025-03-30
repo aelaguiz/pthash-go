@@ -520,20 +520,11 @@ func (ef *EliasFano) Access(rank uint64) uint64 {
 	log.Printf("[DEBUG EF.Access] Select(%d) -> pos=%d", selectRank, pos)
 
 	// --- Calculate High Part ---
-	high := uint64(0)
-	if rank == 0 {
-		high = pos // For rank 0, high part is just the position of the first '1'
-		log.Printf("[DEBUG EF.Access] Rank is 0, high = pos = %d", high)
-	} else {
-		// --- Call Select for previous rank ---
-		prevSelectRank := rank - 1
-		log.Printf("[DEBUG EF.Access] Calling Select(%d)...", prevSelectRank)
-		prevPos := ef.upperBitsSelect.Select(prevSelectRank)
-		log.Printf("[DEBUG EF.Access] Select(%d) -> prevPos=%d", prevSelectRank, prevPos)
-		// Calculate delta: number of 0s between the previous '1' and this '1'
-		high = pos - (prevPos + 1)
-		log.Printf("[DEBUG EF.Access] Rank > 0, high = pos - (prevPos + 1) = %d - (%d + 1) = %d", pos, prevPos, high)
-	}
+	// The high part (value >> L) is encoded by the position of the '1' bit
+	// relative to how many '1's came before it. pos = (value >> L) + rank.
+	// Therefore, high = value >> L = pos - rank.
+	high := pos - rank
+	log.Printf("[DEBUG EF.Access] Calculated high = pos - rank = %d - %d = %d", pos, rank, high)
 
 	// --- Calculate Low Part ---
 	low := uint64(0)
