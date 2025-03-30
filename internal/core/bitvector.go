@@ -184,7 +184,6 @@ func (b *BitVectorBuilder) grow(targetBitIndex uint64) {
         newCapacity = targetCap
     }
     numWords := (newCapacity + 63) / 64
-    log.Printf("[DEBUG BVBuilder.grow Locked] Growing: targetBit=%d, newCapacity=%d, newNumWords=%d", targetBitIndex, newCapacity, numWords)
 
     if numWords > uint64(cap(b.words)) {
         // This allocation is tricky under lock, might be better to pre-allocate larger
@@ -215,8 +214,6 @@ func (b *BitVectorBuilder) Get(pos uint64) bool {
 
 	// Check against actual allocated words (should be consistent if Set maintains size)
 	if wordIndex >= uint64(len(b.words)) {
-		// This implies an internal inconsistency or race condition elsewhere
-		log.Printf("[WARN BVBuilder.Get Locked] pos %d maps to word %d, but len(words) is %d (size=%d)", pos, wordIndex, len(b.words), b.size)
 		return false // Treat as 0 if word doesn't exist yet
 	}
 	return (b.words[wordIndex] & (1 << bitIndex)) != 0
@@ -236,7 +233,6 @@ func (b *BitVectorBuilder) Set(pos uint64) {
 
 	// Double check wordIndex after grow (should be fine)
 	if wordIndex >= uint64(len(b.words)) {
-		log.Printf("[ERROR BVBuilder.Set Locked] pos %d maps to word %d, but len(words) is %d even after grow (cap=%d, size=%d)", pos, wordIndex, len(b.words), b.capacity, b.size)
 		// This indicates a potential issue in grow() or concurrent modification outside locks
 		panic(fmt.Sprintf("BitVectorBuilder.Set inconsistency: cannot access word %d", wordIndex))
 	}
@@ -254,10 +250,6 @@ func (b *BitVectorBuilder) Set(pos uint64) {
 func (b *BitVectorBuilder) PushBack(bit bool) {
     b.mu.Lock()
     defer b.mu.Unlock()
-    
-    oldSize := b.size
-    log.Printf("[DEBUG BVBuilder.PushBack] ENTER: bit=%t, oldSize=%d, capacity=%d, len(words)=%d",
-        bit, oldSize, b.capacity, len(b.words))
 
     b.grow(b.size) // Ensure space for the next bit
     wordIndex := b.size / 64
@@ -269,17 +261,11 @@ func (b *BitVectorBuilder) PushBack(bit bool) {
     
     if bit {
         b.words[wordIndex] |= (1 << bitIndex)
-        log.Printf("[DEBUG BVBuilder.PushBack]   Set bit to 1")
     } else {
         b.words[wordIndex] &= ^(1 << bitIndex) // Explicitly clear
-        log.Printf("[DEBUG BVBuilder.PushBack]   Set bit to 0")
     }
     
-    // Log word state AFTER modification
-    log.Printf("[DEBUG BVBuilder.PushBack]   Word[%d] AFTER:  0x%016x", wordIndex, b.words[wordIndex])
-    
     b.size++ // Increment size
-    log.Printf("[DEBUG BVBuilder.PushBack] EXIT: newSize=%d", b.size)
 }
 
 // AppendBits appends the lowest 'numBits' of 'val'. Thread-safe.

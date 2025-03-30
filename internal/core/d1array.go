@@ -41,9 +41,7 @@ type D1Array struct {
 
 // NewD1Array creates a Rank/Select structure for the given BitVector.
 func NewD1Array(bv *BitVector) *D1Array {
-	log.Printf("[DEBUG D1.New] ENTER: bv is nil=%t", bv == nil)
 	if bv == nil {
-		log.Printf("[DEBUG D1.New] nil BitVector provided, creating empty D1Array")
 		return &D1Array{
 			bv:              NewBitVector(0),
 			size:            0,
@@ -53,10 +51,8 @@ func NewD1Array(bv *BitVector) *D1Array {
 		}
 	}
 
-	log.Printf("[DEBUG D1.New] BitVector size=%d", bv.Size())
 	// Special handling for empty BitVector
 	if bv.Size() == 0 {
-		log.Printf("[DEBUG D1.New] Empty BitVector (size=0), creating empty D1Array")
 		return &D1Array{
 			bv:              bv,
 			size:            0,
@@ -230,28 +226,21 @@ func selectInWord(word uint64, k uint8) uint8 {
 // Select returns the position of the (rank+1)-th set bit (0-based rank).
 // Uses multi-level tables and select-in-word.
 func (d *D1Array) Select(rank uint64) uint64 {
-	// Add entry log
-	log.Printf("[DEBUG D1.Select] ENTER: rank=%d, numSetBits=%d, size=%d", rank, d.numSetBits, d.size)
-
 	if rank >= d.numSetBits {
-		log.Printf("[DEBUG D1.Select] EXIT: rank >= numSetBits, returning size %d", d.size)
 		return d.size // Rank out of bounds
 	}
 	
 	// Special case for empty bit vector
 	if d.size == 0 || d.numSetBits == 0 {
-		log.Printf("[DEBUG D1.Select] EXIT: Empty bit vector, returning size %d", d.size)
 		return d.size
 	}
 
 	// 1. Find superblock containing the rank using binary search on superBlockRanks
 	sbIdx := uint64(0)
 	sbLeft, sbRight := 0, len(d.superBlockRanks)-1
-	log.Printf("[DEBUG D1.Select] Step 1: Finding Superblock (Rank=%d)", rank)
 	for sbLeft <= sbRight {
 		mid := sbLeft + (sbRight-sbLeft)/2
 		midRank := d.superBlockRanks[mid]
-		log.Printf("[DEBUG D1.Select]   SB Search: left=%d, right=%d, mid=%d, midRank=%d", sbLeft, sbRight, mid, midRank)
 		if midRank <= rank {
 			sbIdx = uint64(mid) // Candidate found
 			sbLeft = mid + 1    // Try right half
@@ -260,7 +249,6 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		}
 	}
 	rankInSuperBlock := rank - d.superBlockRanks[sbIdx]
-	log.Printf("[DEBUG D1.Select]   Found SB: sbIdx=%d, rankInSuperBlock=%d", sbIdx, rankInSuperBlock)
 
 	// 2. Find basic block within the superblock using binary search on blockRanks
 	bStartIdx := sbIdx * (d1SuperBlockSize / d1BlockSize)
@@ -269,24 +257,20 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		bEndIdx = uint64(len(d.blockRanks))
 	}
 	if bStartIdx >= bEndIdx { // Handle case where superblock is empty or invalid range
-		log.Printf("[ERROR D1.Select]   Invalid block range: start=%d, end=%d", bStartIdx, bEndIdx)
 		// This indicates a major issue, maybe panic or return error value?
 		return d.size // Return size as error indicator
 	}
 
 	bIdx := bStartIdx                               // Default to start if not found in search (shouldn't happen for rank 0 in block)
 	bLeft, bRight := int(bStartIdx), int(bEndIdx-1) // Ensure bRight is valid index
-	log.Printf("[DEBUG D1.Select] Step 2: Finding Block (RankInSB=%d, Range=[%d, %d])", rankInSuperBlock, bStartIdx, bEndIdx)
 	for bLeft <= bRight {
 		mid := bLeft + (bRight-bLeft)/2
 		// Check bounds for d.blockRanks BEFORE accessing
 		if mid < 0 || mid >= len(d.blockRanks) {
-			log.Printf("[ERROR D1.Select]   Block Search: mid index %d out of bounds [%d, %d]", mid, 0, len(d.blockRanks)-1)
 			// Handle error: break or return? Return size seems safest.
 			return d.size
 		}
 		midRank := uint64(d.blockRanks[mid])
-		log.Printf("[DEBUG D1.Select]   Block Search: left=%d, right=%d, mid=%d, midBlockRank=%d", bLeft, bRight, mid, midRank)
 		if midRank <= rankInSuperBlock {
 			bIdx = uint64(mid) // Candidate found
 			bLeft = mid + 1    // Try right half
@@ -295,7 +279,6 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		}
 	}
 	rankInBlock := rankInSuperBlock - uint64(d.blockRanks[bIdx])
-	log.Printf("[DEBUG D1.Select]   Found Block: bIdx=%d, rankInBlock=%d", bIdx, rankInBlock)
 
 	// 3. Scan words within the basic block to find the word containing the target bit
 	blockStartBit := bIdx * d1BlockSize
@@ -304,36 +287,26 @@ func (d *D1Array) Select(rank uint64) uint64 {
 	startWord := blockStartBit / 64
 	wordIdx := startWord // Start scanning from the beginning of the block
 
-	log.Printf("[DEBUG D1.Select] Step 3: Scanning Words (StartWord=%d, RankInBlock=%d)", startWord, rankInBlock)
-
 	for {
 		if wordIdx >= uint64(len(words)) {
-			log.Printf("[ERROR D1.Select]   Word Scan: wordIdx %d >= len(words) %d", wordIdx, len(words))
 			panic(fmt.Sprintf("Select ran out of words searching for rank %d", rank)) // Keep panic here as it indicates inconsistency
 		}
 		word := words[wordIdx]
 		bitsInWord := uint64(bits.OnesCount64(word))
-		log.Printf("[DEBUG D1.Select]   Word Scan: wordIdx=%d, word=0x%016x, bitsInWord=%d, currentRankInBlock=%d", wordIdx, word, bitsInWord, currentRankInBlock)
 
 		if currentRankInBlock+bitsInWord > rankInBlock {
 			targetRankInWord := uint8(rankInBlock - currentRankInBlock)
-			log.Printf("[DEBUG D1.Select]     Target bit found in this word! targetRankInWord=%d", targetRankInWord)
 
 			posInWord := Select64(word, targetRankInWord) // Use optimized version
-			log.Printf("[DEBUG D1.Select]     Select64(0x%016x, %d) -> posInWord=%d", word, targetRankInWord, posInWord)
 
 			if posInWord >= 64 {
-				log.Printf("[ERROR D1.Select]     selectInWord failed!")
 				panic(fmt.Sprintf("selectInWord failed for rank %d in word %d (0x%x)", targetRankInWord, wordIdx, word))
 			}
 			absPos := wordIdx*64 + uint64(posInWord)
-			log.Printf("[DEBUG D1.Select]     Calculated absolute position: %d", absPos)
 
 			if absPos >= d.size {
-				log.Printf("[ERROR D1.Select]     Result %d out of bounds %d", absPos, d.size)
 				panic(fmt.Sprintf("Select result %d out of bounds %d", absPos, d.size))
 			}
-			log.Printf("[DEBUG D1.Select] EXIT: Returning pos %d", absPos)
 			return absPos
 		}
 		currentRankInBlock += bitsInWord
@@ -346,9 +319,6 @@ func (d *D1Array) Select(rank uint64) uint64 {
 
 // NumBits returns the storage size of the D1Array structure itself in bits.
 func (d *D1Array) NumBits() uint64 {
-	log.Printf("[DEBUG D1.NumBits] ENTER: superBlockRanks.len=%d, blockRanks.len=%d", 
-		len(d.superBlockRanks), len(d.blockRanks))
-	
 	// Fixed metadata: 3 uint64 fields (bv pointer, size, numSetBits)
 	metadataBits := uint64(3 * 8 * 8)
 	
@@ -357,8 +327,6 @@ func (d *D1Array) NumBits() uint64 {
 	bBits := uint64(len(d.blockRanks)) * 16        // uint16 elements
 	
 	totalBits := metadataBits + sbBits + bBits
-	log.Printf("[DEBUG D1.NumBits] EXIT: metadata=%d, sbBits=%d, bBits=%d, total=%d", 
-		metadataBits, sbBits, bBits, totalBits)
 	return totalBits
 }
 

@@ -84,9 +84,7 @@ func optimalParameterKiely(values []uint64) uint8 {
 
 // Encode encodes the values using Rice coding.
 func (rs *RiceSequence) Encode(values []uint64) error {
-	log.Printf("[DEBUG RiceSeq.Encode] ENTER: receiver rs is nil=%t", rs == nil)
 	if rs == nil {
-		log.Printf("[ERROR RiceSeq.Encode] Called on nil receiver!")
 		return fmt.Errorf("RiceSequence.Encode called on nil receiver") // Return error early
 	}
 
@@ -138,7 +136,6 @@ func (rs *RiceSequence) Encode(values []uint64) error {
 	// *** CRITICAL: Build D1Array on the *final* highBits BitVector ***
 	rs.highBitsD1 = NewD1Array(rs.highBits) // Use the built BitVector
 
-	log.Printf("[DEBUG RiceSeq.Encode] EXIT OK (L=%d)", rs.optimalParamL)
 	return nil
 }
 
@@ -276,23 +273,14 @@ type RiceEncoder struct {
 
 func (e *RiceEncoder) Name() string { return "R" }
 func (e *RiceEncoder) Encode(pilots []uint64) error {
-	log.Printf("[DEBUG RiceEnc.Encode] ENTER: receiver e is nil=%t", e == nil)
 	if e == nil {
-		log.Printf("[ERROR RiceEnc.Encode] Called on nil receiver!")
-		// The panic will likely happen on the next line accessing e.values,
-		// but we log the condition first.
-		// We could explicitly return an error here too:
-		// return fmt.Errorf("RiceEncoder.Encode called on nil receiver")
+		return fmt.Errorf("RiceEncoder.Encode called on nil receiver")
 	}
-	log.Printf("[DEBUG RiceEnc.Encode] Initial state: e.values.lowBits=%p, e.values.highBits=%p, e.values.highBitsD1=%p",
-		e.values.lowBits, e.values.highBits, e.values.highBitsD1)
 
 	err := e.values.Encode(pilots) // Call Encode on the embedded RiceSequence
 	if err != nil {
-		log.Printf("[ERROR RiceEnc.Encode] e.values.Encode failed: %v", err)
 		return err
 	}
-	log.Printf("[DEBUG RiceEnc.Encode] EXIT OK (L=%d)", e.values.optimalParamL)
 	return nil
 }
 func (e *RiceEncoder) Access(i uint64) uint64            { return e.values.Access(i) }
@@ -393,18 +381,15 @@ func NewEliasFano() *EliasFano {
 // Encode builds the Elias-Fano structure from a sorted slice of values.
 // Input values MUST be monotonically increasing.
 func (ef *EliasFano) Encode(sortedValues []uint64) error {
-	log.Printf("[DEBUG EF.Encode] ENTER N=%d", len(sortedValues))
 	n := uint64(len(sortedValues))
 	ef.numValues = n
 
 	if n == 0 {
-		log.Printf("[DEBUG EF.Encode] n=0, initializing empty.")
 		ef.universe = 0
 		ef.numLowBits = 0
 		ef.lowerBits = NewCompactVector(0, 0)
 		// upperBitsSelect should contain an empty BitVector
 		ef.upperBitsSelect = NewD1Array(NewBitVector(0))
-		log.Printf("[DEBUG EF.Encode] EXIT OK (Empty)")
 		return nil
 	}
 
@@ -412,17 +397,13 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 	if n > 0 {
 		u = sortedValues[n-1] + 1
 		// Check monotonicity (optional, but good practice)
-		log.Printf("[DEBUG EF.Encode] Checking monotonicity...")
 		for i := uint64(1); i < n; i++ {
 			if sortedValues[i] < sortedValues[i-1] {
-				log.Printf("[ERROR EF.Encode] Monotonicity check failed at index %d", i)
 				return fmt.Errorf("EliasFano.Encode input must be monotonically increasing (value[%d]=%d < value[%d]=%d)", i, sortedValues[i], i-1, sortedValues[i-1])
 			}
 		}
-		log.Printf("[DEBUG EF.Encode] Monotonicity OK.")
 	}
 	ef.universe = u
-	log.Printf("[DEBUG EF.Encode] Calculated U=%d", ef.universe)
 
 	l := uint8(0)
 	if n > 0 && u > n {
@@ -430,15 +411,12 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 		lFloat := math.Log2(ratio) // Use Log2 directly
 		if lFloat >= 0 {           // Ensure non-negative before floor
 			l = uint8(math.Floor(lFloat))
-		} else {
-			log.Printf("[DEBUG EF.Encode] Log2(ratio) was negative (%.2f), setting l=0", lFloat)
 		}
 	}
 	if l > 64 {
 		l = 64
 	} // Clamp
 	ef.numLowBits = l
-	log.Printf("[DEBUG EF.Encode] Calculated L=%d", ef.numLowBits)
 
 	upperBitsSizeEstimate := uint64(0)
 	if u > 0 && l < 64 {
@@ -449,7 +427,6 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 		upperBitsSizeEstimate = n
 	}
 	upperBitsSizeEstimate += 100
-	log.Printf("[DEBUG EF.Encode] upperBits size estimate = %d", upperBitsSizeEstimate)
 
 	lbBuilder := NewCompactVectorBuilder(n, l)
 	ubBuilder := NewBitVectorBuilder(upperBitsSizeEstimate)
@@ -479,57 +456,27 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 		lbBuilder.Set(uint64(i), low)
 
 		delta := high - lastHighPart
-		// Log delta only if it's large or for debugging specific indices
-		// if delta > 10 || i < 5 || i > int(n)-5 {
-		//     log.Printf("[DEBUG EF.Encode] i=%d, v=%d, high=%d, lastHigh=%d, delta=%d", i, v, high, lastHighPart, delta)
-		// }
 		for k := uint64(0); k < delta; k++ {
 			ubBuilder.PushBack(false)
 		} // 0
 		ubBuilder.PushBack(true) // 1
 		lastHighPart = high
 	}
-	log.Printf("[DEBUG EF.Encode] Finished building lowerBits and upperBits vectors.")
-
-	// Log builder state before Build()
-	log.Printf("[DEBUG EF.Encode] BEFORE ubBuilder.Build(): ubBuilder.size=%d, ubBuilder.capacity=%d, len(ubBuilder.words)=%d",
-		ubBuilder.size, ubBuilder.capacity, len(ubBuilder.words))
-	if len(ubBuilder.words) > 0 {
-		log.Printf("[DEBUG EF.Encode]   Last word (before build): 0x%016x", ubBuilder.words[len(ubBuilder.words)-1])
-	}
 
 	ef.lowerBits = lbBuilder.Build()
 	upperBitsBV := ubBuilder.Build() // Build the final bit vector
 
-	// Log BitVector state after Build()
-	log.Printf("[DEBUG EF.Encode] AFTER ubBuilder.Build(): upperBitsBV.size=%d, upperBitsBV.numWords=%d",
-		upperBitsBV.Size(), upperBitsBV.NumWords())
-	if upperBitsBV.NumWords() > 0 {
-		log.Printf("[DEBUG EF.Encode]   First word (after build): 0x%016x", upperBitsBV.Words()[0])
-		if upperBitsBV.NumWords() > 1 {
-			log.Printf("[DEBUG EF.Encode]   Last word (after build): 0x%016x", upperBitsBV.Words()[upperBitsBV.NumWords()-1])
-		}
-	}
-
-	log.Printf("[DEBUG EF.Encode] upperBitsBV size = %d, numWords = %d", upperBitsBV.Size(), upperBitsBV.NumWords())
 	ef.upperBitsSelect = NewD1Array(upperBitsBV) // Build D1Array on the BV
-	log.Printf("[DEBUG EF.Encode] D1Array built. numSetBits=%d", ef.upperBitsSelect.numSetBits)
 
 	if ef.upperBitsSelect.numSetBits != n {
-		log.Printf("[ERROR EF.Encode] Set bit count mismatch: D1Array has %d, expected %d", ef.upperBitsSelect.numSetBits, n)
 		return fmt.Errorf("internal EliasFano error: upperBitsSelect has %d set bits, expected %d", ef.upperBitsSelect.numSetBits, n)
 	}
 
-	log.Printf("[DEBUG EF.Encode] EXIT OK. Final L=%d, U=%d, N=%d, LowerBitsSize=%d, UpperBitsSize=%d, D1ArrayBits=%d",
-		ef.numLowBits, ef.universe, ef.numValues, ef.lowerBits.NumBitsStored(), ef.upperBitsSelect.bv.NumBitsStored(), ef.upperBitsSelect.NumBits())
 	return nil
 }
 
 // Access retrieves the value with rank `i` (0-based). Relies on efficient D1Array.Select.
 func (ef *EliasFano) Access(rank uint64) uint64 {
-	// Add entry log
-	log.Printf("[DEBUG EF.Access] ENTER: rank=%d, numValues=%d, universe=%d, numLowBits=%d", rank, ef.numValues, ef.universe, ef.numLowBits)
-
 	if rank >= ef.numValues {
 		panic(fmt.Sprintf("EliasFano.Access: rank %d out of bounds (%d)", rank, ef.numValues))
 	}
@@ -544,51 +491,28 @@ func (ef *EliasFano) Access(rank uint64) uint64 {
 	}
 
 	// --- Call Select for current rank ---
-	selectRank := rank
-	log.Printf("[DEBUG EF.Access] Calling Select(%d)...", selectRank)
-	pos := ef.upperBitsSelect.Select(selectRank) // Position of (rank+1)-th '1'
-	log.Printf("[DEBUG EF.Access] Select(%d) -> pos=%d", selectRank, pos)
+	pos := ef.upperBitsSelect.Select(rank) // Position of (rank+1)-th '1'
 
 	// --- Calculate High Part ---
 	// The high part (value >> L) is encoded by the position of the '1' bit
 	// relative to how many '1's came before it. pos = (value >> L) + rank.
 	// Therefore, high = value >> L = pos - rank.
 	high := pos - rank
-	log.Printf("[DEBUG EF.Access] Calculated high = pos - rank = %d - %d = %d", pos, rank, high)
 
 	// --- Calculate Low Part ---
 	low := uint64(0)
 	if ef.numLowBits > 0 {
-		log.Printf("[DEBUG EF.Access] Accessing lowerBits[%d]...", rank)
-		// Add panic recovery specifically around lowerBits access
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[PANIC DEBUG EF.Access] Panic accessing lowerBits[%d]: %v", rank, r)
-					// Re-panic or handle error appropriately
-					panic(r) // Re-panic to see stack trace
-				}
-			}()
-			low = ef.lowerBits.Access(rank)
-		}()
-		log.Printf("[DEBUG EF.Access] lowerBits.Access(%d) -> low=%d (0x%x)", rank, low, low)
-	} else {
-		log.Printf("[DEBUG EF.Access] numLowBits is 0, low remains 0")
+		low = ef.lowerBits.Access(rank)
 	}
 
 	// --- Reconstruct Value ---
 	val := low
 	if ef.numLowBits < 64 {
 		val |= (high << ef.numLowBits)
-		log.Printf("[DEBUG EF.Access] Reconstructed val = (high << L) | low = (%d << %d) | %d = %d", high, ef.numLowBits, low, val)
 	} else if high > 0 {
-		log.Printf("[ERROR EF.Access] Decoding error: high part %d > 0 with l=64", high)
 		panic("EliasFano decoding error: high part > 0 with l=64")
-	} else {
-		log.Printf("[DEBUG EF.Access] L=64, Reconstructed val = low = %d", val)
 	}
 
-	log.Printf("[DEBUG EF.Access] EXIT: Returning val %d", val)
 	return val
 }
 
@@ -613,9 +537,6 @@ func (ef *EliasFano) NumBits() uint64 {
 	// The size is the EF metadata + CompactVector's DATA size + D1Array's total size
 	// (D1Array.NumBits already includes its internal BV size and rank structures)
 	totalBits := metadataBits + lbBits + d1Bits
-
-	log.Printf("[DEBUG EF.NumBits] N=%d, metadataBits=%d, lbBits=%d, d1Bits=%d, total=%d",
-		ef.numValues, metadataBits, lbBits, d1Bits, totalBits)
 
 	return totalBits
 }

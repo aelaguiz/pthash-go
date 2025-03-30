@@ -43,8 +43,6 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	mTableSize32 := core.ComputeM32(uint32(tableSize)) // For ADD
 
 	var err error
-	log.Printf("Search decision: NumThreads=%d, NumNonEmptyBuckets=%d, Required=%d",
-		config.NumThreads, numNonEmptyBuckets, uint64(config.NumThreads)*2)
 
 	// --- Use appropriate search function based on config ---
 	isParallel := config.NumThreads > 1 && numNonEmptyBuckets >= uint64(config.NumThreads)*2
@@ -52,21 +50,17 @@ func Search[B core.Bucketer]( // Pass Bucketer type for logger
 	switch config.Search {
 	case core.SearchTypeXOR:
 		if isParallel {
-			log.Printf("Using PARALLEL search (XOR) with %d threads", config.NumThreads)
 			err = searchParallelXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
 				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize64, tableSize)
 		} else {
-			log.Printf("Using SEQUENTIAL search (XOR)")
 			err = searchSequentialXOR(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
 				bucketsIt, taken, pilots, logger, hashedPilotsCache, mTableSize64, tableSize, DefaultMaxPilotAttempts)
 		}
 	case core.SearchTypeAdd:
 		if isParallel {
-			log.Printf("Using PARALLEL search (ADD) with %d threads", config.NumThreads)
 			// err = searchParallelAdd(...) // TODO: Implement Additive Search Parallel
 			return fmt.Errorf("parallel additive search not implemented")
 		} else {
-			log.Printf("Using SEQUENTIAL search (ADD)")
 			err = searchSequentialAdd(numKeys, numBuckets, numNonEmptyBuckets, seed, config,
 				bucketsIt, taken, pilots, logger, mTableSize32, tableSize, DefaultMaxPilotAttempts) // Pass m32
 		}
