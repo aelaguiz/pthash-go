@@ -5,7 +5,6 @@ import (
 	"log"
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -316,7 +315,7 @@ func searchParallelXOR(
 
 			// Simplified pilot search logic - no need for outer retry loop
 			foundPilotForBucket := false
-			
+
 			for currentPilot := uint64(0); ; currentPilot++ {
 				hashedPilot := uint64(0)
 				if currentPilot < searchCacheSize {
@@ -331,7 +330,7 @@ func searchParallelXOR(
 				for _, pld := range payloads {
 					hash := pld
 					p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
-					
+
 					// Optimistic check - thread-safe now
 					if taken.Get(p) {
 						optimisticCheckFailed = true
