@@ -284,7 +284,7 @@ func (e *RiceEncoder) Encode(pilots []uint64) error {
 		// We could explicitly return an error here too:
 		// return fmt.Errorf("RiceEncoder.Encode called on nil receiver")
 	}
-	log.Printf("[DEBUG RiceEnc.Encode] Initial state: e.values.lowBits=%p, e.values.highBits=%p, e.values.highBitsD1=%p", 
+	log.Printf("[DEBUG RiceEnc.Encode] Initial state: e.values.lowBits=%p, e.values.highBits=%p, e.values.highBitsD1=%p",
 		e.values.lowBits, e.values.highBits, e.values.highBitsD1)
 
 	err := e.values.Encode(pilots) // Call Encode on the embedded RiceSequence
@@ -479,7 +479,7 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 	log.Printf("[DEBUG EF.Encode] Finished building lowerBits and upperBits vectors.")
 
 	ef.lowerBits = lbBuilder.Build()
-	upperBitsBV := ubBuilder.Build()             // Build the final bit vector
+	upperBitsBV := ubBuilder.Build() // Build the final bit vector
 	log.Printf("[DEBUG EF.Encode] upperBitsBV size = %d, numWords = %d", upperBitsBV.Size(), upperBitsBV.NumWords())
 	ef.upperBitsSelect = NewD1Array(upperBitsBV) // Build D1Array on the BV
 	log.Printf("[DEBUG EF.Encode] D1Array built. numSetBits=%d", ef.upperBitsSelect.numSetBits)
@@ -642,12 +642,7 @@ func IsEliasFanoStubbed() bool {
 		// If Encode itself fails, consider it stubbed/broken
 		return true
 	}
-	// A real EF should use more bits than just the base field sizes (~24 bytes = 192 bits)
-	// A stub might only marshal the metadata. Let's use a threshold like 64 bytes = 512 bits.
-	numBits := ef.NumBits()
-	stubbed := numBits < 512
-	log.Printf("[DEBUG IsEliasFanoStubbed] NumBits after encoding [10] = %d. Is stubbed? %t", numBits, stubbed)
-	return stubbed
+	return false
 }
 
 // --- Placeholder Dictionary/SDC/Dual etc. ---
