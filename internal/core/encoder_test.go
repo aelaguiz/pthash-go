@@ -187,10 +187,6 @@ func TestDiffEncoderRoundtrip(t *testing.T) {
 }
 
 func TestEliasFanoRoundtrip(t *testing.T) {
-	// Skip test if EliasFano implementation is stubbed
-	if IsEliasFanoStubbed() {
-		t.Skip("EliasFano appears to be stubbed, skipping test")
-	}
 
 	testCases := [][]uint64{
 		{},                   // Empty case
@@ -423,10 +419,6 @@ func TestRiceSequenceAccess(t *testing.T) {
 
 // TestEliasFanoAccess specifically targets the Access method's correctness.
 func TestEliasFanoAccess(t *testing.T) {
-	// NOTE: Temporarily disabled skip to force execution and see potential errors/panics.
-	// if IsEliasFanoStubbed() { // IsEliasFanoStubbed itself relies on D1Array check
-	// 	t.Skip("Skipping EliasFano Access test: D1Array.Select or EF itself is stubbed.")
-	// }
 
 	values := []uint64{10, 25, 26, 100, 150, 1000, 1001, 5000} // Known SORTED data
 	ef := NewEliasFano()

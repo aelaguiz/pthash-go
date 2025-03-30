@@ -244,9 +244,6 @@ func TestRiceSequenceSerialization(t *testing.T) {
 }
 
 func TestEliasFanoSerialization(t *testing.T) {
-	if IsEliasFanoStubbed() {
-		t.Skip("Skipping EliasFanoSerialization test: Implementation is stubbed")
-	}
 	values := []uint64{10, 25, 26, 100, 150, 1000} // Sample sorted data
 	ef1 := NewEliasFano()
 	err := ef1.Encode(values)
