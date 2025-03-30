@@ -138,16 +138,22 @@ func (dm *DenseMono[E]) UnmarshalBinary(data []byte) error {
 	// Handle allocation if E is a pointer type and is currently nil
 	var zeroE E
 	typeE := reflect.TypeOf(zeroE)
+	targetPtr := &dm.Encoder // Default: address for value types
+	
 	if typeE != nil && typeE.Kind() == reflect.Ptr {
-		if reflect.ValueOf(dm.Encoder).IsNil() { // Check if pointer field is nil
-			elemType := typeE.Elem()
-			newInstance := reflect.New(elemType)
-			dm.Encoder = newInstance.Interface().(E)
+		// E is a pointer type
+		encoderValue := reflect.ValueOf(&dm.Encoder).Elem() // Get settable Value of dm.Encoder
+		if encoderValue.IsNil() { // Check if pointer field is nil
+			elemType := typeE.Elem()                 // Get underlying type
+			newInstance := reflect.New(elemType)     // Create new instance as reflect.Value
+			encoderValue.Set(newInstance)            // Use reflection to set the field
 		}
+		// For pointer types, TryUnmarshal needs the pointer itself
+		targetPtr = dm.Encoder // Pass the pointer directly
 	}
-
-	// Now unmarshal into the address of dm.Encoder
-	err := serial.TryUnmarshal(dm.Encoder, data[offset:offset+int(encLen)])
+	
+	// Now unmarshal into the correct target
+	err := serial.TryUnmarshal(targetPtr, data[offset:offset+int(encLen)])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal underlying encoder: %w", err)
 	}
@@ -333,14 +339,24 @@ func (di *DenseInterleaved[E]) UnmarshalBinary(data []byte) error {
 		// Handle pointer allocation if E is a pointer type
 		var zeroE E
 		typeE := reflect.TypeOf(zeroE)
+		targetPtr := &di.Encoders[i] // Default: address for value types
+		
 		if typeE != nil && typeE.Kind() == reflect.Ptr {
-			elemType := typeE.Elem()
-			newInstance := reflect.New(elemType)
-			di.Encoders[i] = newInstance.Interface().(E)
+			// E is a pointer type
+			// Get a settable reflect.Value for the slice element
+			encodersValue := reflect.ValueOf(&di.Encoders).Elem() // Get slice as reflect.Value
+			elemValue := encodersValue.Index(int(i))              // Get element i as reflect.Value
+			
+			elemType := typeE.Elem()                 // Get underlying type
+			newInstance := reflect.New(elemType)     // Create new instance
+			elemValue.Set(newInstance)               // Set the slice element to the new instance
+			
+			// For pointer types, pass the pointer itself to TryUnmarshal
+			targetPtr = di.Encoders[i]
 		}
 
-		// Unmarshal into the address of the (potentially newly allocated) element
-		err := serial.TryUnmarshal(di.Encoders[i], data[offset:offset+int(encLen)])
+		// Unmarshal into the correct target
+		err := serial.TryUnmarshal(targetPtr, data[offset:offset+int(encLen)])
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal encoder %d: %w", i, err)
 		}
@@ -495,16 +511,22 @@ func (de *DiffEncoder[E]) UnmarshalBinary(data []byte) error {
 	// Handle pointer allocation if E is a pointer type
 	var zeroE E
 	typeE := reflect.TypeOf(zeroE)
+	targetPtr := &de.Encoder // Default: address for value types
+	
 	if typeE != nil && typeE.Kind() == reflect.Ptr {
-		if reflect.ValueOf(de.Encoder).IsNil() { // Check if pointer field is nil
-			elemType := typeE.Elem()
-			newInstance := reflect.New(elemType)
-			de.Encoder = newInstance.Interface().(E)
+		// E is a pointer type
+		encoderValue := reflect.ValueOf(&de.Encoder).Elem() // Get settable Value of de.Encoder
+		if encoderValue.IsNil() { // Check if pointer field is nil
+			elemType := typeE.Elem()                 // Get underlying type
+			newInstance := reflect.New(elemType)     // Create new instance as reflect.Value
+			encoderValue.Set(newInstance)            // Use reflection to set the field
 		}
+		// For pointer types, TryUnmarshal needs the pointer itself
+		targetPtr = de.Encoder // Pass the pointer directly
 	}
 
-	// Now unmarshal into the address of Encoder
-	err := serial.TryUnmarshal(de.Encoder, data[offset:expectedEndOffset])
+	// Now unmarshal into the correct target
+	err := serial.TryUnmarshal(targetPtr, data[offset:expectedEndOffset])
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal underlying encoder (type %T): %w", de.Encoder, err)
 	}

@@ -396,8 +396,27 @@ func (f *DensePartitionedPHF[K, H, B, E]) UnmarshalBinary(data []byte) error {
 		if endOffset > len(data) {
 			return offset, fmt.Errorf("%s data bounds: %w", description, io.ErrUnexpectedEOF)
 		}
-		// Pass the allocated pointer target directly
-		err := serial.TryUnmarshal(target, data[offset:endOffset])
+
+		// Use reflection to check if target points to a pointer type
+		// This is similar to how SinglePHF unmarshals generic fields
+		fieldValue := reflect.ValueOf(target).Elem() // Get the value the pointer points to
+		fieldType := fieldValue.Type()               // Get its type (B or E)
+		targetPtr := target                          // Default target for TryUnmarshal
+			
+		if fieldType != nil && fieldType.Kind() == reflect.Ptr {
+			// The field itself is a pointer type (e.g., *SkewBucketer)
+			// We need to allocate it if it's currently nil
+			if fieldValue.IsNil() {
+				elemType := fieldType.Elem()         // Get the underlying struct type
+				newInstance := reflect.New(elemType) // Create a new pointer
+				fieldValue.Set(newInstance)          // Use reflection to set the field
+			}
+			// For pointer types, TryUnmarshal needs the pointer itself (which is now non-nil)
+			targetPtr = fieldValue.Interface() // Pass the pointer value
+		}
+		
+		// Now unmarshal into the correct target pointer
+		err := serial.TryUnmarshal(targetPtr, data[offset:endOffset])
 		if err != nil {
 			return offset, fmt.Errorf("%s: %w", description, err)
 		}
