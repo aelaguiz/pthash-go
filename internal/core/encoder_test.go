@@ -612,10 +612,14 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			if lb == nil {
 				if len(tt.wantLowerValues) > 0 {
 					t.Fatalf("lowerBits is nil, but expected values %v", tt.wantLowerValues)
+				} else if tt.wantN > 0 && tt.wantL > 0 {
+					// Should not be nil if N>0 and L>0
+					t.Fatalf("lowerBits is nil, but N=%d and L=%d", tt.wantN, tt.wantL)
 				}
 			} else {
-				if lb.Size() != uint64(len(tt.wantLowerValues)) {
-					t.Errorf("lowerBits size: got %d, want %d", lb.Size(), len(tt.wantLowerValues))
+				// CORRECTED CHECK: Compare against N, not len(wantLowerValues)
+				if lb.Size() != tt.wantN {
+					t.Errorf("lowerBits size: got %d, want %d", lb.Size(), tt.wantN)
 				}
 				if lb.Width() != tt.wantL { // Check width matches L
 					// Allow width 0 if L is 0, even if wantLowerValues is empty.
