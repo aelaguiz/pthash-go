@@ -577,14 +577,30 @@ func (ef *EliasFano) Access(rank uint64) uint64 {
 
 func (ef *EliasFano) Size() uint64 { return ef.numValues }
 func (ef *EliasFano) NumBits() uint64 {
-	lbBits, selBits := uint64(0), uint64(0)
+	// Metadata stored directly in EliasFano struct:
+	// numValues (uint64), universe (uint64), numLowBits (uint8)
+	metadataBits := uint64(8*8 + 8*8 + 1*8) // Size of the fields themselves
+
+	lbBits := uint64(0)
 	if ef.lowerBits != nil {
+		// Get size of the underlying BitVector used by CompactVector
 		lbBits = ef.lowerBits.NumBitsStored()
 	}
+
+	d1Bits := uint64(0)
 	if ef.upperBitsSelect != nil {
-		selBits = ef.upperBitsSelect.NumBits()
-	} // D1Array size includes its internal BV size
-	return 8*8 + 8*8 + 8 + lbBits + selBits // numValues, universe, numLowBits + data
+		// Get size of D1Array, which includes ITS BitVector and rank structures
+		d1Bits = ef.upperBitsSelect.NumBits()
+	}
+
+	// The size is the EF metadata + CompactVector's DATA size + D1Array's total size
+	// (D1Array.NumBits already includes its internal BV size and rank structures)
+	totalBits := metadataBits + lbBits + d1Bits
+
+	log.Printf("[DEBUG EF.NumBits] N=%d, metadataBits=%d, lbBits=%d, d1Bits=%d, total=%d",
+		ef.numValues, metadataBits, lbBits, d1Bits, totalBits)
+
+	return totalBits
 }
 func (ef *EliasFano) Name() string { return "EF" }
 
