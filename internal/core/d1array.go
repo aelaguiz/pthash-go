@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"math/bits"
 )
@@ -246,7 +247,7 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		return d.size // Return size as error indicator
 	}
 
-	bIdx := bStartIdx // Default to start if not found in search (shouldn't happen for rank 0 in block)
+	bIdx := bStartIdx                               // Default to start if not found in search (shouldn't happen for rank 0 in block)
 	bLeft, bRight := int(bStartIdx), int(bEndIdx-1) // Ensure bRight is valid index
 	log.Printf("[DEBUG D1.Select] Step 2: Finding Block (RankInSB=%d, Range=[%d, %d])", rankInSuperBlock, bStartIdx, bEndIdx)
 	for bLeft <= bRight {
