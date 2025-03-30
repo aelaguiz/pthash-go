@@ -526,6 +526,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 		name            string
 		values          []uint64
 		wantL           uint8
+		wantN           uint64   // Expected number of values (size)
 		wantLowerValues []uint64 // Expected values in lowerBits CompactVector
 		wantUpperBits   string   // Expected upperBits pattern (LSB first)
 	}{
@@ -533,6 +534,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:            "Empty",
 			values:          []uint64{},
 			wantL:           0,
+			wantN:           0,
 			wantLowerValues: []uint64{},
 			wantUpperBits:   "",
 		},
@@ -540,6 +542,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:            "SingleZero",
 			values:          []uint64{0},
 			wantL:           0,
+			wantN:           1,
 			wantLowerValues: []uint64{}, // Width 0 -> No values stored explicitly? Check CompactVector impl. Assuming it handles W=0.
 			wantUpperBits:   "1",        // Delta=0 -> just '1'
 		},
@@ -547,6 +550,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:            "SingleValue5_L2", // log2(43/1)=5, so l=5. Expect l=5 though? Let's recheck L calc. log2(43)=5.4. floor=5. Correct L is 5.
 			values:          []uint64{42},      // U=43, N=1. L=floor(log2(43/1))=5. High=42>>5=1. Low=42&31=10. Delta=1.
 			wantL:           5,
+			wantN:           1,
 			wantLowerValues: []uint64{10}, // 42 & 0b11111 = 10
 			wantUpperBits:   "01",         // delta=1 -> one '0', one '1'
 		},
@@ -554,6 +558,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:   "SimpleSequence_L1", // U=27, N=6. L=floor(log2(27/6))=floor(log2(4.5))=2.
 			values: []uint64{1, 7, 11, 13, 23, 26},
 			wantL:  2,
+			wantN:  6,
 			// Lows (mask=3): 1&3=1, 7&3=3, 11&3=3, 13&3=1, 23&3=3, 26&3=2
 			wantLowerValues: []uint64{1, 3, 3, 1, 3, 2},
 			// Highs (>>2):   0,     1,     2,     3,     5,     6
@@ -565,6 +570,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:            "Sequence_L0", // U=8, N=5. L=floor(log2(8/5))=floor(log2(1.6))=0.
 			values:          []uint64{0, 1, 2, 5, 7},
 			wantL:           0,
+			wantN:           5,
 			wantLowerValues: []uint64{}, // W=0
 			// Highs (>>0):   0, 1, 2, 5, 7
 			// Deltas:        0, 1, 1, 3, 2
@@ -575,6 +581,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:            "Sequence_Delta0", // U=4, N=3. L=floor(log2(4/3))=floor(log2(1.33))=0.
 			values:          []uint64{0, 1, 3},
 			wantL:           0,
+			wantN:           3,
 			wantLowerValues: []uint64{}, // W=0
 			// Highs (>>0):   0, 1, 3
 			// Deltas:        0, 1, 2
@@ -586,6 +593,7 @@ func TestEliasFanoEncodeLogic(t *testing.T) {
 			name:   "CrossWordBoundary_L1",              // Need L>0 so high parts change. N=30, U~120 -> L=floor(log2(120/30))=2.
 			values: generateCrossingSequence(30, 1, 60), // L=1 forced. Values like 0,3,6,...,87. Max High ~ 43. Deltas mostly 1 or 2.
 			wantL:  1,
+			wantN:  30,
 			// Lower: 0,1,0,1,...,0,1 (alternating)
 			wantLowerValues: generateExpectedLows(30, 1),
 			// Upper: 1,01,01,01, (30 ones), total length 60. Add one more? Let's make N=35. U~105. L=1.
