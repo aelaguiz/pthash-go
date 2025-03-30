@@ -285,7 +285,8 @@ func TestRangeBucketerLogic(t *testing.T) {
 		want BucketIDType // Changed from uint64 to BucketIDType
 	}{
 		{0x00000000_FFFFFFFF, 0},                            // Low hash -> bucket 0
-		{0x19999999_00000000, 1},                            // High ~ 1/10th -> bucket 1
+		{0x19999999_00000000, 0},                            // High ~ 1/10th -> bucket 0 (calculation: 0x19999999 * 10 >> 32 = 0)
+		{0x1999999A_00000000, 1},                            // High > 1/10th -> bucket 1 (added test case)
 		{0x80000000_12345678, 5},                            // High ~ 1/2 -> bucket 5
 		{0xFFFFFFFF_ABCDEF01, BucketIDType(numBuckets - 1)}, // High ~ max -> last bucket
 	}
