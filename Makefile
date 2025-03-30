@@ -1,4 +1,4 @@
-.PHONY: build test bench fmt vet clean all
+.PHONY: build test bench fmt vet clean all simple-e2e build-simple-e2e
 
 BINARY_NAME_BUILD=build
 BINARY_NAME_EXAMPLE=example
@@ -17,6 +17,14 @@ build:
 test:
 	@echo "Running tests..."
 	go test ./... -v
+
+build-simple-e2e:
+	@echo "Building simple end-to-end example..."
+	go build -o simple_e2e ./examples/simple_e2e
+
+simple-e2e: build-simple-e2e
+	@echo "Running simple end-to-end example..."
+	./simple_e2e
 
 # Run tests with race detector
 test-race:
