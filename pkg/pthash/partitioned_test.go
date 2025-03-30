@@ -324,7 +324,7 @@ func TestPartitionedPHFSerializationDense(t *testing.T) {
 
 	// --- Build the Partitioned PHF with Retry Logic ---
 	const maxBuildRetries = 3 // Try up to 3 different random seeds
-	var builderInst *builder.NewInternalMemoryBuilderPartitionedPHF[K, H, *B]
+	var builderInst *builder.InternalMemoryBuilderPartitionedPHF[K, H, *B]
 	var err error
 	buildSuccess := false
 
