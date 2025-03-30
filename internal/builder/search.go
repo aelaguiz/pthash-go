@@ -276,7 +276,6 @@ func searchParallelXOR(
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(numThreads)
 
 	// Global state for coordinating bucket processing
 	var nextBucketIdx atomic.Uint64 // Next bucket index to be processed globally
@@ -284,11 +283,9 @@ func searchParallelXOR(
 
 	// Worker goroutine function
 	worker := func(tid int) {
-		log.Printf("DIAGNOSE [W%d]: Worker started", tid) // Log worker start
-		defer func() {
-			log.Printf("DIAGNOSE [W%d]: Worker exiting", tid) // Log worker exit
-			wg.Done()
-		}()
+		log.Printf("DIAGNOSE [W%d]: Worker started", tid)       // Log worker start
+		defer log.Printf("DIAGNOSE [W%d]: Worker exiting", tid) // Log worker exit
+
 		positions := make([]uint64, 0, core.MaxBucketSize) // Thread-local buffer
 
 		loopIteration := 0 // Counter for loop iterations
@@ -320,95 +317,103 @@ func searchParallelXOR(
 			}
 
 			// --- Conditions passed: Claim index and get bucket ---
+			// Add the bucket to the WaitGroup counter BEFORE releasing lock
+			wg.Add(1)
 			localBucketIdx := nextBucketIdx.Add(1) - 1 // Claim index atomically
 			bucket := bucketsIt.Next()                 // Get bucket data
-			log.Printf("DIAGNOSE [W%d]: Claimed index %d, Got Bucket ID %d (Size %d). Releasing lock.", tid, localBucketIdx, bucket.ID(), bucket.Size())
+			log.Printf("DIAGNOSE [W%d]: Claimed index %d, Got Bucket ID %d (Size %d). Releasing lock. WG count increased.", tid, localBucketIdx, bucket.ID(), bucket.Size())
 			bucketMutex.Unlock()
 			log.Printf("DIAGNOSE [W%d]: Released bucketMutex Lock (after getting bucket).", tid)
 
 			// --- Process the bucket ---
-			bucketSize := bucket.Size()
-			bucketID := bucket.ID()
-			payloads := bucket.Payloads()
-			log.Printf("DIAGNOSE [W%d]: Processing index %d (BucketID: %d, Size: %d)", tid, localBucketIdx, bucketID, bucketSize)
+			// Use anonymous function with defer to ensure wg.Done() is called
+			func() {
+				defer wg.Done() // Signal bucket processing completion regardless of outcome
 
-			// --- Pilot Search Loop (Keep logging minimal here unless debugging pilot search itself) ---
-			foundPilotForBucket := false
-			pilotSearchStartTime := time.Now()
+				bucketSize := bucket.Size()
+				bucketID := bucket.ID()
+				payloads := bucket.Payloads()
+				log.Printf("DIAGNOSE [W%d]: Processing index %d (BucketID: %d, Size: %d). Will decrease WG count when done.", tid, localBucketIdx, bucketID, bucketSize)
 
-			for currentPilot := uint64(0); ; currentPilot++ { // Pilot loop unchanged for now
+				// --- Pilot Search Loop (Keep logging minimal here unless debugging pilot search itself) ---
+				foundPilotForBucket := false
+				pilotSearchStartTime := time.Now()
 
-				if currentPilot >= DefaultMaxPilotAttempts {
-					log.Printf("FAIL [W%d]: Reached max attempts (%d) for bucket index %d (ID: %d)", tid, DefaultMaxPilotAttempts, localBucketIdx, bucketID)
-					// TODO: How to handle global failure signal?
-					break // Exit pilot search for this bucket
-				}
+				for currentPilot := uint64(0); ; currentPilot++ { // Pilot loop unchanged for now
 
-				// ... (pilot hash calculation, optimistic check, in-bucket check - unchanged) ...
-				hashedPilot := uint64(0)
-				if currentPilot < searchCacheSize {
-					hashedPilot = hashedPilotsCache[currentPilot]
-				} else {
-					hashedPilot = core.DefaultHash64(currentPilot, seed)
-				}
-
-				positions = positions[:0]
-				optimisticCheckFailed := false
-				for _, pld := range payloads {
-					hash := pld
-					p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
-					if taken.Get(p) { // Safe Get
-						optimisticCheckFailed = true
-						break
+					if currentPilot >= DefaultMaxPilotAttempts {
+						log.Printf("FAIL [W%d]: Reached max attempts (%d) for bucket index %d (ID: %d)", tid, DefaultMaxPilotAttempts, localBucketIdx, bucketID)
+						// TODO: How to handle global failure signal?
+						break // Exit pilot search for this bucket
 					}
-					positions = append(positions, p)
-				}
-				if optimisticCheckFailed {
-					continue
-				}
 
-				sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
-				inBucketCollision := false
-				for i := 1; i < len(positions); i++ {
-					if positions[i] == positions[i-1] {
-						inBucketCollision = true
-						break
+					// ... (pilot hash calculation, optimistic check, in-bucket check - unchanged) ...
+					hashedPilot := uint64(0)
+					if currentPilot < searchCacheSize {
+						hashedPilot = hashedPilotsCache[currentPilot]
+					} else {
+						hashedPilot = core.DefaultHash64(currentPilot, seed)
 					}
-				}
-				if inBucketCollision {
-					continue
-				}
 
-				// --- Commit ---
-				for _, p := range positions {
-					taken.Set(p) // Safe Set
+					positions = positions[:0]
+					optimisticCheckFailed := false
+					for _, pld := range payloads {
+						hash := pld
+						p := core.FastModU64(hash^hashedPilot, mTableSize, tableSize)
+						if taken.Get(p) { // Safe Get
+							optimisticCheckFailed = true
+							break
+						}
+						positions = append(positions, p)
+					}
+					if optimisticCheckFailed {
+						continue
+					}
+
+					sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+					inBucketCollision := false
+					for i := 1; i < len(positions); i++ {
+						if positions[i] == positions[i-1] {
+							inBucketCollision = true
+							break
+						}
+					}
+					if inBucketCollision {
+						continue
+					}
+
+					// --- Commit ---
+					for _, p := range positions {
+						taken.Set(p) // Safe Set
+					}
+					pilotsEmplaceBack(bucketID, currentPilot) // Uses pilotsMu
+					loggerMu.Lock()
+					logger.Update(localBucketIdx, bucketSize)
+					loggerMu.Unlock()
+
+					foundPilotForBucket = true
+					log.Printf("DIAGNOSE [W%d]: Found pilot %d for index %d (ID: %d) in %v", tid, currentPilot, localBucketIdx, bucketID, time.Since(pilotSearchStartTime))
+					break // Success for this bucket
+				} // End pilot search loop
+
+				if !foundPilotForBucket {
+					log.Printf("DIAGNOSE [W%d]: Failed to find pilot for index %d (ID: %d) after %d attempts.", tid, localBucketIdx, bucketID, DefaultMaxPilotAttempts)
+					// WG.Done is still called via defer
 				}
-				pilotsEmplaceBack(bucketID, currentPilot) // Uses pilotsMu
-				loggerMu.Lock()
-				logger.Update(localBucketIdx, bucketSize)
-				loggerMu.Unlock()
-
-				foundPilotForBucket = true
-				log.Printf("DIAGNOSE [W%d]: Found pilot %d for index %d (ID: %d) in %v", tid, currentPilot, localBucketIdx, bucketID, time.Since(pilotSearchStartTime))
-				break // Success for this bucket
-			} // End pilot search loop
-
-			if !foundPilotForBucket {
-				log.Printf("DIAGNOSE [W%d]: Failed to find pilot for index %d (ID: %d) after %d attempts.", tid, localBucketIdx, bucketID, DefaultMaxPilotAttempts)
-				// Continue to next bucket attempt in the worker loop
-			}
+			}() // End of anonymous function
 
 		} // End main worker loop (`for {}`)
 	} // End worker func
 
 	// Start workers
-	log.Printf("Starting %d worker goroutines for parallel search", numThreads)
+	log.Printf("Starting %d worker goroutines for parallel search. Waiting for %d bucket completions...", numThreads, numNonEmptyBuckets)
 	for i := 0; i < numThreads; i++ {
 		go worker(i)
 	}
 
-	// Wait for all workers to finish
+	// Wait for all bucket processing to finish
 	wg.Wait()
+	log.Printf("Main thread finished waiting for bucket processing.")
 
 	// Check if all buckets were processed
 	finalIdx := nextBucketIdx.Load()

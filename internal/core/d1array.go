@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"math/bits"
 )
@@ -229,7 +228,7 @@ func (d *D1Array) Select(rank uint64) uint64 {
 	if rank >= d.numSetBits {
 		return d.size // Rank out of bounds
 	}
-	
+
 	// Special case for empty bit vector
 	if d.size == 0 || d.numSetBits == 0 {
 		return d.size
@@ -321,11 +320,11 @@ func (d *D1Array) Select(rank uint64) uint64 {
 func (d *D1Array) NumBits() uint64 {
 	// Fixed metadata: 3 uint64 fields (bv pointer, size, numSetBits)
 	metadataBits := uint64(3 * 8 * 8)
-	
+
 	// Data size: actual space used by rank arrays
-	sbBits := uint64(len(d.superBlockRanks)) * 64  // uint64 elements
-	bBits := uint64(len(d.blockRanks)) * 16        // uint16 elements
-	
+	sbBits := uint64(len(d.superBlockRanks)) * 64 // uint64 elements
+	bBits := uint64(len(d.blockRanks)) * 16       // uint16 elements
+
 	totalBits := metadataBits + sbBits + bBits
 	return totalBits
 }

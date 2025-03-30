@@ -9,6 +9,7 @@ import (
 	"pthashgo/internal/core"
 	"pthashgo/internal/util"
 	"pthashgo/pkg/pthash"
+	"runtime"
 )
 
 // check performs correctness checks (copied from single_test.go for self-containment)
@@ -107,10 +108,10 @@ func main() {
 	config.Minimal = true // Build a Minimal Perfect Hash Function
 	config.Verbose = true // Show build steps
 	config.Seed = buildSeed
-	// config.NumThreads = runtime.NumCPU() // Use multiple cores for build steps if available
+	config.NumThreads = runtime.NumCPU() // Use multiple cores for build steps if available
 
 	// Temporarily to get past race
-	config.NumThreads = 1
+	// config.NumThreads = 1
 	// Use default Alpha and Lambda for simplicity
 	log.Printf("Build Config: N=%d, Alpha=%.2f, Lambda=%.1f, Minimal=%t, Seed=%d, Threads=%d",
 		numKeys, config.Alpha, config.Lambda, config.Minimal, config.Seed, config.NumThreads)

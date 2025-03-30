@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 )
 
 // CompactVector stores integers using a fixed number of bits per element.
@@ -37,7 +36,7 @@ func NewCompactVector(n uint64, w uint8) *CompactVector {
 	}
 
 	underlyingBV := NewBitVector(totalBits)
-	
+
 	cv := &CompactVector{
 		data:  underlyingBV,
 		width: w,
@@ -248,7 +247,7 @@ func (b *CompactVectorBuilder) Build() *CompactVector {
 	if b.vector == nil {
 		panic("CompactVectorBuilder.Build called multiple times")
 	}
-	
+
 	// Special handling for width=0
 	if b.vector.width == 0 {
 		// Ensure underlying data is minimal
@@ -257,7 +256,7 @@ func (b *CompactVectorBuilder) Build() *CompactVector {
 			b.vector.data = NewBitVector(0)
 		}
 	}
-	
+
 	result := b.vector
 	b.vector = nil // Prevent further modification
 	return result
