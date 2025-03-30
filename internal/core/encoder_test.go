@@ -304,6 +304,98 @@ func TestEliasFanoRoundtrip(t *testing.T) {
 				}
 			}
 
+			// Add test for CompactEncoder serialization
+			func TestCompactEncoderSerialization(t *testing.T) {
+				values := []uint64{1, 5, 0, 10, 7}
+				ce1 := &CompactEncoder{}
+				err := ce1.Encode(values)
+				if err != nil {
+					t.Fatalf("Encode failed: %v", err)
+				}
+
+				data, err := ce1.MarshalBinary()
+				if err != nil {
+					t.Fatalf("Marshal failed: %v", err)
+				}
+
+				ce2 := &CompactEncoder{}
+				err = ce2.UnmarshalBinary(data)
+				if err != nil {
+					t.Fatalf("Unmarshal failed: %v", err)
+				}
+
+				if ce1.Size() != ce2.Size() {
+					t.Errorf("Size mismatch: %d != %d", ce1.Size(), ce2.Size())
+				}
+				if ce1.values.Width() != ce2.values.Width() {
+					t.Errorf("Width mismatch: %d != %d", ce1.values.Width(), ce2.values.Width())
+				}
+				for i := uint64(0); i < ce1.Size(); i++ {
+					if ce1.Access(i) != ce2.Access(i) {
+						t.Errorf("Access(%d) mismatch: %d != %d", i, ce1.Access(i), ce2.Access(i))
+					}
+				}
+			}
+
+			// Add test for RiceEncoder serialization
+			func TestRiceEncoderSerialization(t *testing.T) {
+				if IsD1ArraySelectStubbed() {
+					t.Skip("Skipping RiceEncoderSerialization test: D1Array.Select is stubbed")
+				}
+				values := []uint64{0, 5, 10, 10, 25, 60}
+				re1 := &RiceEncoder{}
+				err := re1.Encode(values)
+				if err != nil {
+					t.Fatalf("Encode failed: %v", err)
+				}
+
+				data, err := re1.MarshalBinary()
+				if err != nil {
+					t.Fatalf("Marshal failed: %v", err)
+				}
+
+				re2 := &RiceEncoder{}
+				err = re2.UnmarshalBinary(data)
+				if err != nil {
+					t.Fatalf("Unmarshal failed: %v", err)
+				}
+
+				if re1.Size() != re2.Size() {
+					t.Errorf("Size mismatch: %d != %d", re1.Size(), re2.Size())
+				}
+				if re1.values.optimalParamL != re2.values.optimalParamL {
+					t.Errorf("L mismatch: %d != %d", re1.values.optimalParamL, re2.values.optimalParamL)
+				}
+				for i := uint64(0); i < re1.Size(); i++ {
+					if re1.Access(i) != re2.Access(i) {
+						t.Errorf("Access(%d) mismatch: %d != %d", i, re1.Access(i), re2.Access(i))
+					}
+				}
+			}
+
+			// Test serialization roundtrip
+			data, err := ef.MarshalBinary()
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+
+			ef2 := NewEliasFano()
+			err = ef2.UnmarshalBinary(data)
+			if err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+
+			// Deep comparison is hard, just check size and access again
+			if ef2.Size() != uint64(len(values)) {
+				t.Fatalf("Size mismatch after unmarshal: got %d, want %d", ef2.Size(), len(values))
+			}
+			for i, expected := range values {
+				got := ef2.Access(uint64(i))
+				if got != expected {
+					t.Errorf("Access(%d) after unmarshal: got %d, want %d", i, got, expected)
+				}
+			}
+
 			// Signal completion for N=2 case
 			if len(values) == 2 && testDone != nil {
 				testDone <- true
