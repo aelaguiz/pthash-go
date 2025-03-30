@@ -496,37 +496,78 @@ func (ef *EliasFano) Encode(sortedValues []uint64) error {
 
 // Access retrieves the value with rank `i` (0-based). Relies on efficient D1Array.Select.
 func (ef *EliasFano) Access(rank uint64) uint64 {
+	// Add entry log
+	log.Printf("[DEBUG EF.Access] ENTER: rank=%d, numValues=%d, universe=%d, numLowBits=%d", rank, ef.numValues, ef.universe, ef.numLowBits)
+
 	if rank >= ef.numValues {
 		panic(fmt.Sprintf("EliasFano.Access: rank %d out of bounds (%d)", rank, ef.numValues))
 	}
 	if ef.numValues == 0 {
 		panic("EliasFano.Access: accessing empty structure")
 	}
-	if ef.upperBitsSelect == nil {
-		panic("EliasFano.Access: D1Array not initialized")
+	if ef.upperBitsSelect == nil || ef.upperBitsSelect.bv == nil {
+		panic("EliasFano.Access: D1Array or its BitVector not initialized")
+	}
+	if ef.lowerBits == nil && ef.numLowBits > 0 { // Add check for lowerBits
+	    panic("EliasFano.Access: lowerBits is nil but numLowBits > 0")
 	}
 
-	selectRank := rank
-	pos := ef.upperBitsSelect.Select(selectRank) // Position of (rank+1)-th '1'
 
+	// --- Call Select for current rank ---
+	selectRank := rank
+	log.Printf("[DEBUG EF.Access] Calling Select(%d)...", selectRank)
+	pos := ef.upperBitsSelect.Select(selectRank) // Position of (rank+1)-th '1'
+	log.Printf("[DEBUG EF.Access] Select(%d) -> pos=%d", selectRank, pos)
+
+	// --- Calculate High Part ---
 	high := uint64(0)
 	if rank == 0 {
-		high = pos
+		high = pos // For rank 0, high part is just the position of the first '1'
+		log.Printf("[DEBUG EF.Access] Rank is 0, high = pos = %d", high)
 	} else {
-		prevPos := ef.upperBitsSelect.Select(rank - 1)
+		// --- Call Select for previous rank ---
+		prevSelectRank := rank - 1
+		log.Printf("[DEBUG EF.Access] Calling Select(%d)...", prevSelectRank)
+		prevPos := ef.upperBitsSelect.Select(prevSelectRank)
+		log.Printf("[DEBUG EF.Access] Select(%d) -> prevPos=%d", prevSelectRank, prevPos)
+		// Calculate delta: number of 0s between the previous '1' and this '1'
 		high = pos - (prevPos + 1)
-	}
-	low := uint64(0)
-	if ef.numLowBits > 0 {
-		low = ef.lowerBits.Access(rank)
+		log.Printf("[DEBUG EF.Access] Rank > 0, high = pos - (prevPos + 1) = %d - (%d + 1) = %d", pos, prevPos, high)
 	}
 
+	// --- Calculate Low Part ---
+	low := uint64(0)
+	if ef.numLowBits > 0 {
+		log.Printf("[DEBUG EF.Access] Accessing lowerBits[%d]...", rank)
+		// Add panic recovery specifically around lowerBits access
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[PANIC DEBUG EF.Access] Panic accessing lowerBits[%d]: %v", rank, r)
+					// Re-panic or handle error appropriately
+					panic(r) // Re-panic to see stack trace
+				}
+			}()
+			low = ef.lowerBits.Access(rank)
+		}()
+		log.Printf("[DEBUG EF.Access] lowerBits.Access(%d) -> low=%d (0x%x)", rank, low, low)
+	} else {
+		log.Printf("[DEBUG EF.Access] numLowBits is 0, low remains 0")
+	}
+
+	// --- Reconstruct Value ---
 	val := low
 	if ef.numLowBits < 64 {
 		val |= (high << ef.numLowBits)
+		log.Printf("[DEBUG EF.Access] Reconstructed val = (high << L) | low = (%d << %d) | %d = %d", high, ef.numLowBits, low, val)
 	} else if high > 0 {
+		log.Printf("[ERROR EF.Access] Decoding error: high part %d > 0 with l=64", high)
 		panic("EliasFano decoding error: high part > 0 with l=64")
+	} else {
+		log.Printf("[DEBUG EF.Access] L=64, Reconstructed val = low = %d", val)
 	}
+
+	log.Printf("[DEBUG EF.Access] EXIT: Returning val %d", val)
 	return val
 }
 

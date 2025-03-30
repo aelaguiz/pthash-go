@@ -208,16 +208,23 @@ func selectInWord(word uint64, k uint8) uint8 {
 // Select returns the position of the (rank+1)-th set bit (0-based rank).
 // Uses multi-level tables and select-in-word.
 func (d *D1Array) Select(rank uint64) uint64 {
+	// Add entry log
+	log.Printf("[DEBUG D1.Select] ENTER: rank=%d, numSetBits=%d, size=%d", rank, d.numSetBits, d.size)
+
 	if rank >= d.numSetBits {
+		log.Printf("[DEBUG D1.Select] EXIT: rank >= numSetBits, returning size %d", d.size)
 		return d.size // Rank out of bounds
 	}
 
 	// 1. Find superblock containing the rank using binary search on superBlockRanks
 	sbIdx := uint64(0)
 	sbLeft, sbRight := 0, len(d.superBlockRanks)-1
+	log.Printf("[DEBUG D1.Select] Step 1: Finding Superblock (Rank=%d)", rank)
 	for sbLeft <= sbRight {
 		mid := sbLeft + (sbRight-sbLeft)/2
-		if d.superBlockRanks[mid] <= rank {
+		midRank := d.superBlockRanks[mid]
+		log.Printf("[DEBUG D1.Select]   SB Search: left=%d, right=%d, mid=%d, midRank=%d", sbLeft, sbRight, mid, midRank)
+		if midRank <= rank {
 			sbIdx = uint64(mid) // Candidate found
 			sbLeft = mid + 1    // Try right half
 		} else {
@@ -225,6 +232,7 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		}
 	}
 	rankInSuperBlock := rank - d.superBlockRanks[sbIdx]
+	log.Printf("[DEBUG D1.Select]   Found SB: sbIdx=%d, rankInSuperBlock=%d", sbIdx, rankInSuperBlock)
 
 	// 2. Find basic block within the superblock using binary search on blockRanks
 	bStartIdx := sbIdx * (d1SuperBlockSize / d1BlockSize)
@@ -232,12 +240,26 @@ func (d *D1Array) Select(rank uint64) uint64 {
 	if bEndIdx > uint64(len(d.blockRanks)) {
 		bEndIdx = uint64(len(d.blockRanks))
 	}
+	if bStartIdx >= bEndIdx { // Handle case where superblock is empty or invalid range
+		log.Printf("[ERROR D1.Select]   Invalid block range: start=%d, end=%d", bStartIdx, bEndIdx)
+		// This indicates a major issue, maybe panic or return error value?
+		return d.size // Return size as error indicator
+	}
 
 	bIdx := bStartIdx // Default to start if not found in search (shouldn't happen for rank 0 in block)
-	bLeft, bRight := int(bStartIdx), int(bEndIdx-1)
+	bLeft, bRight := int(bStartIdx), int(bEndIdx-1) // Ensure bRight is valid index
+	log.Printf("[DEBUG D1.Select] Step 2: Finding Block (RankInSB=%d, Range=[%d, %d])", rankInSuperBlock, bStartIdx, bEndIdx)
 	for bLeft <= bRight {
 		mid := bLeft + (bRight-bLeft)/2
-		if uint64(d.blockRanks[mid]) <= rankInSuperBlock {
+		// Check bounds for d.blockRanks BEFORE accessing
+		if mid < 0 || mid >= len(d.blockRanks) {
+			log.Printf("[ERROR D1.Select]   Block Search: mid index %d out of bounds [%d, %d]", mid, 0, len(d.blockRanks)-1)
+			// Handle error: break or return? Return size seems safest.
+			return d.size
+		}
+		midRank := uint64(d.blockRanks[mid])
+		log.Printf("[DEBUG D1.Select]   Block Search: left=%d, right=%d, mid=%d, midBlockRank=%d", bLeft, bRight, mid, midRank)
+		if midRank <= rankInSuperBlock {
 			bIdx = uint64(mid) // Candidate found
 			bLeft = mid + 1    // Try right half
 		} else {
@@ -245,6 +267,7 @@ func (d *D1Array) Select(rank uint64) uint64 {
 		}
 	}
 	rankInBlock := rankInSuperBlock - uint64(d.blockRanks[bIdx])
+	log.Printf("[DEBUG D1.Select]   Found Block: bIdx=%d, rankInBlock=%d", bIdx, rankInBlock)
 
 	// 3. Scan words within the basic block to find the word containing the target bit
 	blockStartBit := bIdx * d1BlockSize
@@ -253,35 +276,36 @@ func (d *D1Array) Select(rank uint64) uint64 {
 	startWord := blockStartBit / 64
 	wordIdx := startWord // Start scanning from the beginning of the block
 
+	log.Printf("[DEBUG D1.Select] Step 3: Scanning Words (StartWord=%d, RankInBlock=%d)", startWord, rankInBlock)
+
 	for {
 		if wordIdx >= uint64(len(words)) {
-			// Should not happen if rank < numSetBits
-			panic(fmt.Sprintf("Select ran out of words searching for rank %d", rank))
+			log.Printf("[ERROR D1.Select]   Word Scan: wordIdx %d >= len(words) %d", wordIdx, len(words))
+			panic(fmt.Sprintf("Select ran out of words searching for rank %d", rank)) // Keep panic here as it indicates inconsistency
 		}
 		word := words[wordIdx]
 		bitsInWord := uint64(bits.OnesCount64(word))
+		log.Printf("[DEBUG D1.Select]   Word Scan: wordIdx=%d, word=0x%016x, bitsInWord=%d, currentRankInBlock=%d", wordIdx, word, bitsInWord, currentRankInBlock)
 
 		if currentRankInBlock+bitsInWord > rankInBlock {
-			// The target bit is within this word (wordIdx)
-			targetRankInWord := uint8(rankInBlock - currentRankInBlock) // 0-based rank within word
+			targetRankInWord := uint8(rankInBlock - currentRankInBlock)
+			log.Printf("[DEBUG D1.Select]     Target bit found in this word! targetRankInWord=%d", targetRankInWord)
 
-			// --- Use PDEP if available (or optimized selectInWord) ---
-			// posInWord := selectInWord(word, targetRankInWord) // Use placeholder for now
 			posInWord := Select64(word, targetRankInWord) // Use optimized version
+			log.Printf("[DEBUG D1.Select]     Select64(0x%016x, %d) -> posInWord=%d", word, targetRankInWord, posInWord)
 
 			if posInWord >= 64 {
+				log.Printf("[ERROR D1.Select]     selectInWord failed!")
 				panic(fmt.Sprintf("selectInWord failed for rank %d in word %d (0x%x)", targetRankInWord, wordIdx, word))
 			}
 			absPos := wordIdx*64 + uint64(posInWord)
+			log.Printf("[DEBUG D1.Select]     Calculated absolute position: %d", absPos)
 
-			// Final sanity check (optional but good for debugging)
 			if absPos >= d.size {
+				log.Printf("[ERROR D1.Select]     Result %d out of bounds %d", absPos, d.size)
 				panic(fmt.Sprintf("Select result %d out of bounds %d", absPos, d.size))
 			}
-			// Check if Rank1(absPos+1) == rank+1
-			// if d.Rank1(absPos+1) != rank+1 {
-			//    panic(fmt.Sprintf("Select verification failed: Rank1(%d+1)=%d != rank+1=%d", absPos, d.Rank1(absPos+1), rank+1))
-			// }
+			log.Printf("[DEBUG D1.Select] EXIT: Returning pos %d", absPos)
 			return absPos
 		}
 		currentRankInBlock += bitsInWord

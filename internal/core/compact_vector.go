@@ -43,15 +43,21 @@ func NewCompactVector(n uint64, w uint8) *CompactVector {
 
 // Access retrieves the value at the given index.
 func (cv *CompactVector) Access(i uint64) uint64 {
+	log.Printf("[DEBUG CV.Access] ENTER: index=%d, size=%d, width=%d", i, cv.size, cv.width)
 	if i >= cv.size {
 		panic(fmt.Sprintf("CompactVector.Access: index %d out of bounds (%d)", i, cv.size))
 	}
 	if cv.width == 0 {
+		log.Printf("[DEBUG CV.Access] EXIT: width=0, returning 0")
 		return 0 // All elements are 0 if width is 0
 	}
 	pos := i * uint64(cv.width)
+	log.Printf("[DEBUG CV.Access]   Bit position pos=%d", pos)
 	// Use the optimized GetBits from BitVector
-	return cv.data.GetBits(pos, cv.width)
+	val := cv.data.GetBits(pos, cv.width)
+	log.Printf("[DEBUG CV.Access]   GetBits(pos=%d, width=%d) -> val=%d (0x%x)", pos, cv.width, val, val)
+	log.Printf("[DEBUG CV.Access] EXIT: Returning val %d", val)
+	return val
 }
 
 // Set sets the value at the given index.
