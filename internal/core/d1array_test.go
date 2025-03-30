@@ -115,17 +115,42 @@ func TestD1ArrayCorrectness(t *testing.T) {
 }
 
 func TestD1ArrayEmpty(t *testing.T) {
+	// Test with empty BitVector (size=0)
+	emptyBV := NewBitVector(0)
+	d1Empty := NewD1Array(emptyBV)
+
+	if d1Empty.numSetBits != 0 {
+		t.Errorf("Empty BV: Expected 0 set bits, got %d", d1Empty.numSetBits)
+	}
+	if d1Empty.size != 0 {
+		t.Errorf("Empty BV: Expected size 0, got %d", d1Empty.size)
+	}
+	if len(d1Empty.superBlockRanks) != 0 || len(d1Empty.blockRanks) != 0 {
+		t.Errorf("Empty BV: Expected empty rank arrays, got superBlockRanks.len=%d, blockRanks.len=%d", 
+			len(d1Empty.superBlockRanks), len(d1Empty.blockRanks))
+	}
+	if s := d1Empty.Select(0); s != 0 {
+		t.Errorf("Empty BV: Select(0) on empty: got %d, want 0 (size)", s)
+	}
+	
+	// Check NumBits on empty D1Array
+	expectedBits := uint64(3 * 8 * 8) // 3 uint64 fields (metadata only)
+	if bits := d1Empty.NumBits(); bits != expectedBits {
+		t.Errorf("Empty BV: NumBits: got %d, want %d", bits, expectedBits)
+	}
+
+	// Also test with zero-filled BitVector (size > 0 but no set bits)
 	bv := NewBitVector(100)
 	d1 := NewD1Array(bv)
 
 	if d1.numSetBits != 0 {
-		t.Errorf("Expected 0 set bits, got %d", d1.numSetBits)
+		t.Errorf("Zero-filled BV: Expected 0 set bits, got %d", d1.numSetBits)
 	}
 	if r := d1.Rank1(50); r != 0 {
-		t.Errorf("Rank1(50) on empty: got %d, want 0", r)
+		t.Errorf("Zero-filled BV: Rank1(50) on empty: got %d, want 0", r)
 	}
 	if s := d1.Select(0); s != 100 {
-		t.Errorf("Select(0) on empty: got %d, want 100 (size)", s)
+		t.Errorf("Zero-filled BV: Select(0) on empty: got %d, want 100 (size)", s)
 	}
 }
 

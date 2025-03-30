@@ -41,8 +41,29 @@ type D1Array struct {
 
 // NewD1Array creates a Rank/Select structure for the given BitVector.
 func NewD1Array(bv *BitVector) *D1Array {
+	log.Printf("[DEBUG D1.New] ENTER: bv is nil=%t", bv == nil)
 	if bv == nil {
-		return &D1Array{bv: NewBitVector(0)} // Handle nil gracefully
+		log.Printf("[DEBUG D1.New] nil BitVector provided, creating empty D1Array")
+		return &D1Array{
+			bv:              NewBitVector(0),
+			size:            0,
+			numSetBits:      0,
+			superBlockRanks: make([]uint64, 0),
+			blockRanks:      make([]uint16, 0),
+		}
+	}
+
+	log.Printf("[DEBUG D1.New] BitVector size=%d", bv.Size())
+	// Special handling for empty BitVector
+	if bv.Size() == 0 {
+		log.Printf("[DEBUG D1.New] Empty BitVector (size=0), creating empty D1Array")
+		return &D1Array{
+			bv:              bv,
+			size:            0,
+			numSetBits:      0,
+			superBlockRanks: make([]uint64, 0),
+			blockRanks:      make([]uint16, 0),
+		}
 	}
 
 	d1 := &D1Array{
@@ -325,10 +346,20 @@ func (d *D1Array) Select(rank uint64) uint64 {
 
 // NumBits returns the storage size of the D1Array structure itself in bits.
 func (d *D1Array) NumBits() uint64 {
-	sbBits := uint64(len(d.superBlockRanks)) * 64
-	bBits := uint64(len(d.blockRanks)) * 16 // uint16
-	// Size fields + slice data. Slice headers are excluded for simplicity.
-	return 64 + 64 + 64 + sbBits + bBits // bv pointer size + size + numSetBits + ranks data
+	log.Printf("[DEBUG D1.NumBits] ENTER: superBlockRanks.len=%d, blockRanks.len=%d", 
+		len(d.superBlockRanks), len(d.blockRanks))
+	
+	// Fixed metadata: 3 uint64 fields (bv pointer, size, numSetBits)
+	metadataBits := uint64(3 * 8 * 8)
+	
+	// Data size: actual space used by rank arrays
+	sbBits := uint64(len(d.superBlockRanks)) * 64  // uint64 elements
+	bBits := uint64(len(d.blockRanks)) * 16        // uint16 elements
+	
+	totalBits := metadataBits + sbBits + bBits
+	log.Printf("[DEBUG D1.NumBits] EXIT: metadata=%d, sbBits=%d, bBits=%d, total=%d", 
+		metadataBits, sbBits, bBits, totalBits)
+	return totalBits
 }
 
 // MarshalBinary implements encoding.BinaryMarshaler.
